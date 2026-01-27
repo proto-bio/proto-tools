@@ -12,9 +12,9 @@ import pytest
 from pydantic import ValidationError
 
 from bio_programming.tools.orf_prediction import (
+    ORF,
     ProdigalConfig,
     ProdigalInput,
-    ProdigalOrf,
     ProdigalOutput,
     run_prodigal_prediction,
 )
@@ -217,7 +217,7 @@ class TestProdigalOrfStructure:
 
         if result.num_orfs > 0 and result.predicted_orfs:
             orf = result.predicted_orfs[0][0]
-            assert isinstance(orf, ProdigalOrf)
+            assert isinstance(orf, ORF)
 
             # Check all expected fields exist
             expected_fields = [

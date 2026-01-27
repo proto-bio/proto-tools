@@ -12,10 +12,10 @@ import pytest
 from bio_programming.tools.orf_prediction import (
     OrfipyConfig,
     OrfipyInput,
-    OrfipyOrf,
     OrfipyOutput,
     run_orfipy_prediction,
 )
+from bio_programming.tools.orf_prediction.orf import ORF
 from tests.tool_tests.tool_infra_tests.test_export_functionality import validate_output
 
 # Test data file paths
@@ -220,9 +220,9 @@ class TestOrfipyIntegration:
 def _create_sample_orf(
     parent_id: str = "seq_0",
     orf_id: str = "ORF.1",
-) -> OrfipyOrf:
-    """Helper to create a sample OrfipyOrf for testing."""
-    return OrfipyOrf(
+) -> ORF:
+    """Helper to create a sample ORF for testing."""
+    return ORF(
         parent_id=parent_id,
         orf_id=orf_id,
         strand="+",
@@ -279,10 +279,19 @@ class TestOrfipyOutputComputedFields:
         )
 
         expected_columns = {
-            "parent_id", "orf_id", "id", "strand", "frame",
-            "amino_acid_sequence", "nucleotide_sequence",
-            "amino_acid_length", "nucleotide_length",
-            "nucleotide_start", "nucleotide_end",
+            "parent_id",
+            "orf_id",
+            "id",
+            "strand",
+            "frame",
+            "amino_acid_sequence",
+            "nucleotide_sequence",
+            "amino_acid_length",
+            "nucleotide_length",
+            "nucleotide_start",
+            "nucleotide_end",
+            "metrics",
+            "gc_content",
         }
         assert set(output.results_df.columns) == expected_columns
         assert output.results_df.iloc[0]["parent_id"] == "seq_0"

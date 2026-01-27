@@ -43,18 +43,21 @@ STRUCTURE_PREDICTORS = {
 FAST_PREDICTORS = ["esmfold"]
 
 
-def _supports_msa_config(config_class):
-    """Check if a config class has nested ColabFoldSearchConfig."""
-    return (
-        hasattr(config_class, "model_fields") and "use_msa" in config_class.model_fields
+def _supports_msa(config_class):
+    """Check if a config class supports MSA."""
+    return hasattr(config_class, "model_fields") and "use_msa" in config_class.model_fields
+
+
+def _make_param(predictor_name, use_msa, msa_search_mode):
+    """Create a pytest.param with appropriate ID and marks."""
+    suffix = (
+        f"with_msa-{msa_search_mode}"
+        if use_msa and msa_search_mode
+        else ("with_msa" if use_msa else "without_msa")
     )
-
-
-def _supports_msa_search_mode(config_class):
-    """Check if a config class supports configurable MSA search mode (local/remote)."""
-    return (
-        hasattr(config_class, "model_fields")
-        and "colabfold_search_config" in config_class.model_fields
+    marks = pytest.mark.slow if predictor_name not in FAST_PREDICTORS else ()
+    return pytest.param(
+        predictor_name, use_msa, msa_search_mode, id=f"{predictor_name}-{suffix}", marks=marks
     )
 
 
@@ -62,60 +65,18 @@ def _generate_msa_params():
     """Generate MSA parameter combinations, filtering out unsupported combinations."""
     params = []
     for predictor_name, (_, _, config_class) in STRUCTURE_PREDICTORS.items():
-        if _supports_msa_config(config_class):
-            if _supports_msa_search_mode(config_class):
-                # Predictor supports both MSA and search mode configuration
-                params.append(
-                    pytest.param(
-                        predictor_name,
-                        True,
-                        "local",
-                        id=f"{predictor_name}-with_msa-local",
-                        marks=pytest.mark.slow if predictor_name not in FAST_PREDICTORS else (),
-                    )
-                )
-                params.append(
-                    pytest.param(
-                        predictor_name,
-                        True,
-                        "remote",
-                        id=f"{predictor_name}-with_msa-remote",
-                        marks=pytest.mark.slow if predictor_name not in FAST_PREDICTORS else (),
-                    )
-                )
-            else:
-                # Predictor supports MSA but not search mode configuration
-                params.append(
-                    pytest.param(
-                        predictor_name,
-                        True,
-                        None,
-                        id=f"{predictor_name}-with_msa",
-                        marks=pytest.mark.slow if predictor_name not in FAST_PREDICTORS else (),
-                    )
-                )
-            # Add without_msa variant for all MSA-supporting predictors
-            params.append(
-                pytest.param(
-                    predictor_name,
-                    False,
-                    None,
-                    id=f"{predictor_name}-without_msa",
-                    marks=pytest.mark.slow if predictor_name not in FAST_PREDICTORS else (),
-                )
+        if _supports_msa(config_class):
+            # Predictor supports MSA with both local and remote search modes
+            params.extend(
+                [
+                    # _make_param(predictor_name, True, "local"), # DISABLED FOR NOW: these take too long, and local MSAs are tested separately
+                    _make_param(predictor_name, True, "remote"),
+                ]
             )
-        else:
-            # Predictor doesn't support MSA at all (e.g., ESMFold)
-            # Only test without MSA
-            params.append(
-                pytest.param(
-                    predictor_name,
-                    False,
-                    None,
-                    id=f"{predictor_name}-without_msa",
-                    marks=pytest.mark.slow if predictor_name not in FAST_PREDICTORS else (),
-                )
-            )
+
+        # All predictors get a without_msa variant
+        params.append(_make_param(predictor_name, False, None))
+
     return params
 
 
@@ -151,7 +112,7 @@ def test_folding(fasta_file, predictor_name, use_msa, msa_search_mode):
     inputs = input_class(complexes=complexes)
 
     # Create config with MSA settings (if supported)
-    if _supports_msa_config(config_class):
+    if _supports_msa(config_class):
         config = config_class(use_msa=use_msa, verbose=True)
 
         # Configure MSA search mode if specified
