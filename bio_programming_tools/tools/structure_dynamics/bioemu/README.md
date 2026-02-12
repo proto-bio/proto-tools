@@ -7,7 +7,7 @@ BioEmu generates protein conformational ensembles using a diffusion generative m
 - **Tool key**: `bioemu-sample`
 - **Input**: Single-chain protein sequences (monomers only, recommended <= 500 residues)
 - **Output**: `StructureEnsemble` objects containing sampled backbone conformations
-- **Execution**: GPU required (the cloud runtime cloud or local venv)
+- **Execution**: GPU required
 
 ## When to Use This Tool
 
@@ -50,10 +50,8 @@ Both models accept the same inputs and produce the same output format. v1.1 gene
 
 | Mode | Condition | Backend | Device |
 |------|-----------|---------|--------|
-| the cloud runtime (cloud GPU) | `use_cloud_gpu() == True` | `BioEmuService` on the cloud runtime | Remote GPU |
 | Local venv | `use_cloud_gpu() == False` | `EnvManager("bioemu")` running `standalone/inference.py` | Local GPU (`cuda`) |
 
-Both modes produce identical results. the cloud runtime is used in production; local venv is used for development.
 
 ## How It Works
 

@@ -50,7 +50,6 @@ Currently only the small open-source model is available. Larger models may becom
 
 ESM3 can run locally or on the cloud runtime:
 - **Local GPU/CPU**: Loads the model on-demand. Use `device="cuda"`, `"cpu"`, or `"mps"`.
-- **the cloud runtime GPU**: Used automatically when configured in the environment.
 
 ## How It Works
 

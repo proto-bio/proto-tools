@@ -8,7 +8,7 @@ Enformer is a transformer-based deep learning model that predicts gene expressio
 - **Model context**: 196,608 bp (fixed length, ~98 kb in each direction from center)
 - **Output resolution**: 896 bins x 128 bp per bin
 - **Species heads**: `human` (5,313 tracks), `mouse` (1,643 tracks)
-- **GPU required**: Yes (the cloud runtime cloud or local venv)
+- **GPU required**: Yes
 
 ## When to Use This Tool
 
@@ -44,10 +44,9 @@ Enformer requires GPU acceleration for inference. Two execution backends are sup
 
 | Mode | Backend | When Used | Setup |
 |------|---------|-----------|-------|
-| **the cloud runtime** | Cloud GPU (A10G/A100) | `USE_CLOUD_GPU=true` in environment | No local GPU needed |
 | **Local venv** | Local CUDA GPU | Default when the cloud runtime is not configured | Requires NVIDIA GPU with CUDA |
 
-The execution mode is selected automatically based on the `USE_CLOUD_GPU` environment variable. Both modes produce identical results.
+
 
 ## How It Works
 

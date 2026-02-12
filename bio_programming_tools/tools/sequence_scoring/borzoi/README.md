@@ -9,7 +9,7 @@ Borzoi is a deep learning model that predicts gene expression and regulatory act
 - **Output resolution**: 6,144 bins x 128 bp per bin (~786 kb output span)
 - **Species heads**: `human`, `mouse`
 - **Replicates**: 4 independently trained models
-- **GPU required**: Yes (the cloud runtime cloud or local venv)
+- **GPU required**: Yes
 
 ## When to Use This Tool
 
@@ -52,10 +52,9 @@ Borzoi requires GPU acceleration for inference. Two execution backends are suppo
 
 | Mode | Backend | When Used | Setup |
 |------|---------|-----------|-------|
-| **the cloud runtime** | Cloud GPU (A10G/A100) | `USE_CLOUD_GPU=true` in environment | No local GPU needed |
 | **Local venv** | Local CUDA GPU | Default when the cloud runtime is not configured | Requires NVIDIA GPU with CUDA |
 
-The execution mode is selected automatically based on the `USE_CLOUD_GPU` environment variable. For ensemble mode, the cloud runtime runs all 4 replicates server-side in one call; local mode runs them sequentially.
+For ensemble mode, all 4 replicates run sequentially.
 
 ## How It Works
 
