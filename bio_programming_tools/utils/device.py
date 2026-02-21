@@ -1,7 +1,7 @@
 """
 Infrastructure utilities for bio_programming_tools.tools.
 
-GPU selection (local/the cloud runtime) and device visibility.
+GPU detection and device visibility.
 
 GPU detection uses nvidia-smi rather than torch.cuda so that the
 orchestrator package works with a CPU-only PyTorch install (or no
@@ -11,7 +11,6 @@ that have their own CUDA-enabled PyTorch.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 
@@ -34,54 +33,9 @@ def number_of_available_gpus() -> int:
         return 0
 
 
-def use_cloud_gpu() -> bool:
-    """
-    Smart GPU selection: try local GPU first, fall back to the cloud runtime.
-
-    Returns:
-        bool: True if should use the cloud runtime, False if should use local GPU.
-
-    Environment Variables:
-        USE_CLOUD: Set to "true" to force the cloud runtime, "false" to force local
-                   If not set, automatically chooses based on GPU availability
-    """
-    # Check if user explicitly set preference
-    use_cloud_env = os.getenv("USE_CLOUD")
-    if use_cloud_env is not None:
-        return use_cloud_env.lower() == "true"
-
-    # Auto-detect: try local GPU first, fall back to the cloud runtime
-    if _is_local_gpu_available():
-        return False
-    elif _is_cloud_available():
-        logger.info("Local GPU not available, falling back to the cloud runtime")
-        return True
-    else:
-        raise RuntimeError(
-            "Neither local GPU nor the cloud runtime is available. "
-            "Please either:\n"
-            "1. Ensure you have CUDA available locally\n"
-            "2. Set up the cloud runtime (cloud token new)\n"
-            "3. Set USE_CLOUD=true to force the cloud runtime execution"
-        )
-
-
 def _is_local_gpu_available() -> bool:
     """Check if a local NVIDIA GPU is available via nvidia-smi."""
     return shutil.which("nvidia-smi") is not None and number_of_available_gpus() > 0
-
-
-def _is_cloud_available() -> bool:
-    """Check if the cloud runtime is available and configured."""
-    try:
-        import _gpu_runtime
-
-        # Try creating a simple app to test authentication
-        _gpu_runtime.App("test-auth")
-        return True
-    except (ImportError, Exception) as e:
-        logger.debug("the cloud runtime not available: %s", e)
-        return False
 
 
 def determine_visible_devices(device: int | str) -> str:
