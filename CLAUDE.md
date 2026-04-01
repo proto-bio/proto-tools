@@ -228,17 +228,7 @@ Flat functions only (no test classes). See `notes/testing.md` for full conventio
 
 ### MCP Server
 
-An MCP server (`mcp_server/`) exposes the ToolRegistry over the Model Context Protocol. Claude Code auto-discovers it via `.mcp.json`. Use MCP tools to discover available tools, search by keyword, inspect schemas, and read citations without importing Python.
-
-```bash
-# Manual launch (stdio)
-python -m mcp_server
-
-# HTTP transport
-python -m mcp_server --transport http --port 9200
-```
-
-Requires `pip install -e ".[mcp]"` (adds `fastmcp>=2.0.0`).
+The MCP server has been migrated to [the tools backend](https://github.com/evo-design/the tools backend). See that repo for MCP server setup and usage.
 
 ### Running Tools Directly
 

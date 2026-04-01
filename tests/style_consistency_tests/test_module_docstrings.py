@@ -13,7 +13,7 @@ from .helpers import collect_py_files
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SOURCE_DIRS = ["proto_tools", "mcp_server", "tests"]
+_SOURCE_DIRS = ["proto_tools", "tests"]
 
 _EXCLUDE_PATTERNS = [
     # Auto-copied at runtime; path header would be wrong after copy
