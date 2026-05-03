@@ -260,10 +260,6 @@ Flat functions only (no test classes). See `notes/testing.md` for full conventio
 
 ## Using proto-tools with Claude Code
 
-### MCP Server
-
-The MCP server has been migrated to [the tools backend](https://github.com/evo-design/the tools backend). See that repo for MCP server setup and usage.
-
 ### Running Tools Directly
 
 When a user asks to run a bioinformatics tool:
