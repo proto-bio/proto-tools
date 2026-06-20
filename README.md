@@ -125,8 +125,10 @@ Some tools use gated models that require accepting a license / terms-of-use. Two
 <a href="proto_tools/tools/sequence_scoring/">sequence_scoring/</a>               # Genomic and regulatory scoring
 ├── <a href="proto_tools/tools/sequence_scoring/alphagenome/">alphagenome/</a>
 ├── <a href="proto_tools/tools/sequence_scoring/borzoi/">borzoi/</a>
+├── <a href="proto_tools/tools/sequence_scoring/deeppbs_specificity/">deeppbs_specificity/</a>
 ├── <a href="proto_tools/tools/sequence_scoring/enformer/">enformer/</a>
 ├── <a href="proto_tools/tools/sequence_scoring/malinois/">malinois/</a>
+├── <a href="proto_tools/tools/sequence_scoring/na_mpnn_specificity/">na_mpnn_specificity/</a>
 ├── <a href="proto_tools/tools/sequence_scoring/puffin/">puffin/</a>
 └── <a href="proto_tools/tools/sequence_scoring/segmasker/">segmasker/</a>
 <a href="proto_tools/tools/structure_alignment/">structure_alignment/</a>            # Structure comparison
