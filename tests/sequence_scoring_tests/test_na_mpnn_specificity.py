@@ -23,9 +23,7 @@ from tests.tool_infra_tests.test_export_functionality import validate_output
 # which only sits on sys.path inside a tool venv. Add its source dir so the pure
 # canonicalization logic can be imported and unit-tested on the host.
 sys.path.insert(0, str(Path(next(iter(_shs.__path__)))))
-_standalone_run = importlib.import_module(
-    "proto_tools.tools.sequence_scoring.na_mpnn_specificity.standalone.run"
-)
+_standalone_run = importlib.import_module("proto_tools.tools.sequence_scoring.na_mpnn_specificity.standalone.run")
 
 
 # -- Input validation ------------------------------------------------------------------
@@ -129,9 +127,7 @@ def test_canonicalize_npz_infers_unknown_true_base(tmp_path):
 # -- Dispatch (mocked) -----------------------------------------------------------------
 
 
-@patch(
-    "proto_tools.tools.sequence_scoring.na_mpnn_specificity.na_mpnn_specificity.ToolInstance.dispatch"
-)
+@patch("proto_tools.tools.sequence_scoring.na_mpnn_specificity.na_mpnn_specificity.ToolInstance.dispatch")
 def test_run_returns_canonicalized_output(mock_dispatch):
     """run_na_mpnn_specificity wraps dispatch results into a typed, exportable output."""
     mock_dispatch.return_value = {
@@ -164,9 +160,7 @@ def test_run_returns_canonicalized_output(mock_dispatch):
     mock_dispatch.assert_called_once()
 
 
-@patch(
-    "proto_tools.tools.sequence_scoring.na_mpnn_specificity.na_mpnn_specificity.ToolInstance.dispatch"
-)
+@patch("proto_tools.tools.sequence_scoring.na_mpnn_specificity.na_mpnn_specificity.ToolInstance.dispatch")
 def test_run_validates_result_cardinality(mock_dispatch):
     """A result count that doesn't match the inputs is a hard error."""
     mock_dispatch.return_value = {"results": []}
@@ -211,9 +205,7 @@ def test_na_mpnn_specificity_benchmark(request):
     inputs = NAMPNNSpecificityInput(pdb_paths=[str(pdb_file)])
     config = NAMPNNSpecificityConfig()
 
-    result = benchmark_twice(
-        request, "na_mpnn_specificity", lambda: run_na_mpnn_specificity(inputs, config)
-    )
+    result = benchmark_twice(request, "na_mpnn_specificity", lambda: run_na_mpnn_specificity(inputs, config))
     validate_output(result)
 
     assert result.tool_id == "na-mpnn-specificity"

@@ -21,9 +21,7 @@ from proto_tools.utils import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_NA_MPNN_REPO_PATH = "/large_storage/hielab/userspace/adititm/NA-MPNN"
-DEFAULT_NA_MPNN_CHECKPOINT_PATH = (
-    "/large_storage/hielab/userspace/adititm/NA-MPNN/models/specificity_model/s_70114.pt"
-)
+DEFAULT_NA_MPNN_CHECKPOINT_PATH = "/large_storage/hielab/userspace/adititm/NA-MPNN/models/specificity_model/s_70114.pt"
 
 
 # ============================================================================
@@ -76,7 +74,9 @@ class NAMPNNSpecificityResult(BaseModel):
     input_name: str = Field(title="Input Name", description="Basename of the scored input structure")
     source_method: str = Field(title="Source Method", description="Source method tag for this prediction")
     output_npz_path: str = Field(title="Output NPZ Path", description="Path to canonical NPZ output")
-    predicted_ppm: list[list[float]] = Field(title="Predicted PPM", description="Canonical DNA PPM (L x 4) in A,C,G,T order")
+    predicted_ppm: list[list[float]] = Field(
+        title="Predicted PPM", description="Canonical DNA PPM (L x 4) in A,C,G,T order"
+    )
     true_sequence: list[int] = Field(title="True Sequence", description="Canonical DNA truth indices in 0..3")
     mask: list[int] = Field(title="Mask", description="Valid residue mask for canonical rows")
     dna_mask: list[int] = Field(title="DNA Mask", description="DNA residue mask for canonical rows")
@@ -137,10 +137,7 @@ class NAMPNNSpecificityOutput(BaseToolOutput):
                 writer.writeheader()
                 for row in rows:
                     writer.writerow(
-                        {
-                            key: json.dumps(value) if isinstance(value, list) else value
-                            for key, value in row.items()
-                        }
+                        {key: json.dumps(value) if isinstance(value, list) else value for key, value in row.items()}
                     )
             return
         raise ValueError(f"Unsupported format: {file_format}")
@@ -292,9 +289,7 @@ def run_na_mpnn_specificity(
 
     results = [NAMPNNSpecificityResult(**item) for item in output_data["results"]]
     if len(results) != len(inputs.pdb_paths):
-        raise ValueError(
-            f"Expected {len(inputs.pdb_paths)} NA-MPNN results, got {len(results)}"
-        )
+        raise ValueError(f"Expected {len(inputs.pdb_paths)} NA-MPNN results, got {len(results)}")
     return NAMPNNSpecificityOutput(
         results=results,
         metadata={"num_inputs": len(results)},

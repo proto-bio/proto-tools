@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from standalone_helpers import get_logger
+from standalone_helpers import get_logger, get_subprocess_device_env
 
 logger = get_logger(__name__)
 
@@ -195,7 +195,7 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
         os.makedirs(output_dir, exist_ok=True)
 
         repo_pythonpath = os.pathsep.join([repo_path, os.environ.get("PYTHONPATH", "")]).strip(os.pathsep)
-        env = os.environ.copy()
+        env = get_subprocess_device_env(config.get("device", "cuda"))
         env["PYTHONPATH"] = repo_pythonpath
         env["PYTHONNOUSERSITE"] = "1"
         configured_x3dna_bin_path = config.get("x3dna_bin_path")

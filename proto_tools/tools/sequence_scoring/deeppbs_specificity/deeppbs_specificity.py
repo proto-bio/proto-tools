@@ -75,8 +75,15 @@ class DeepPBSSpecificityConfig(BaseConfig):
         keep_intermediate (bool): Keep intermediate process and predict files.
         no_clean_protein (bool): Pass --no_cleanp to DeepPBS preprocessing to skip
             pdb2pqr-dependent protein cleaning.
+        device (str): Device to run DeepPBS inference on (inherited).
     """
 
+    device: str = ConfigField(
+        title="Device",
+        default="cuda",
+        description="Device to run DeepPBS inference on",
+        include_in_key=False,
+    )
     deeppbs_repo_path: str = ConfigField(
         title="DeepPBS Repo Path",
         default=DEFAULT_DEEPPBS_REPO_PATH,

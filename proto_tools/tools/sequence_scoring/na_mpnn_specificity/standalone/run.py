@@ -172,12 +172,8 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
         if proc.returncode != 0:
             stderr_tail = (proc.stderr or "").strip().splitlines()[-30:]
             stdout_tail = (proc.stdout or "").strip().splitlines()[-30:]
-            combined_tail = "\n".join(
-                ["[stderr]", *stderr_tail, "", "[stdout]", *stdout_tail]
-            ).strip()
-            raise RuntimeError(
-                f"NA-MPNN inference failed for {pdb_path} (exit {proc.returncode}).\n{combined_tail}"
-            )
+            combined_tail = "\n".join(["[stderr]", *stderr_tail, "", "[stdout]", *stdout_tail]).strip()
+            raise RuntimeError(f"NA-MPNN inference failed for {pdb_path} (exit {proc.returncode}).\n{combined_tail}")
 
     raw_npz = os.path.join(raw_dir, "specificity", f"{input_name}.npz")
     if not os.path.exists(raw_npz):
@@ -222,10 +218,7 @@ def run_na_mpnn_specificity(input_data: dict[str, Any]) -> dict[str, Any]:
         "verbose": bool(input_data.get("verbose", False)),
     }
 
-    results = [
-        _run_one_structure(pdb_path, config, output_root)
-        for pdb_path in input_data["pdb_paths"]
-    ]
+    results = [_run_one_structure(pdb_path, config, output_root) for pdb_path in input_data["pdb_paths"]]
 
     return {"results": results}
 
