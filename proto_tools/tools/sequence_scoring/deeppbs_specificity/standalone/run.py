@@ -112,13 +112,14 @@ def _canonicalize_prediction(raw_npz_path: str, canonical_npz_path: str) -> dict
 def _fallback_canonical_from_pdb(canonical_npz_path: str, pdb_path: str) -> dict[str, Any]:
     """Build a conservative fallback canonical output from DNA residues in a PDB.
 
-    Emits the same forward + reverse-complement strand layout as
-    ``_canonicalize_prediction`` so the schema is identical whether or not the fallback
-    ran: ``2L`` rows, ``chain_labels`` 0 for the forward strand and 1 for the generated
-    complementary strand, and a uniform ``0.25`` PPM.
+    Emits one row per DNA residue found (per-chain labels). For a standard two-strand
+    co-crystal this already matches the real path's row count (one row per base, both
+    strands), with a uniform ``0.25`` PPM in place of a real prediction.
     """
     seen = set()
-    forward_bases: list[int] = []
+    chain_to_idx: dict[str, int] = {}
+    true_sequence: list[int] = []
+    chain_labels: list[int] = []
 
     with open(pdb_path, encoding="utf-8", errors="ignore") as handle:
         for line in handle:
@@ -137,42 +138,39 @@ def _fallback_canonical_from_pdb(canonical_npz_path: str, pdb_path: str) -> dict
             if key in seen:
                 continue
             seen.add(key)
-            forward_bases.append(_DNA_RES_TO_INT[resn])
 
-    if not forward_bases:
-        forward_bases = [0]
+            if chain_id not in chain_to_idx:
+                chain_to_idx[chain_id] = len(chain_to_idx)
+            true_sequence.append(_DNA_RES_TO_INT[resn])
+            chain_labels.append(chain_to_idx[chain_id])
 
-    length = len(forward_bases)
-    seq_one_hot = np.zeros((length, 4), dtype=np.float64)
-    seq_one_hot[np.arange(length), forward_bases] = 1.0
-    bp_seq = np.flip(np.flip(seq_one_hot, axis=1), axis=0)
-    seq_full = np.concatenate((seq_one_hot, bp_seq), axis=0)
+    if not true_sequence:
+        true_sequence = [0]
+        chain_labels = [0]
 
-    true_dna = np.argmax(seq_full, axis=1).astype(np.int64)
-    chain_labels = np.concatenate(
-        (np.zeros(length, dtype=np.int64), np.ones(length, dtype=np.int64)),
-        axis=0,
-    )
-    predicted_ppm = np.full((2 * length, 4), 0.25, dtype=np.float64)
-    mask = np.ones(2 * length, dtype=np.int64)
-    dna_mask = np.ones(2 * length, dtype=np.int64)
+    length = len(true_sequence)
+    predicted_ppm = np.full((length, 4), 0.25, dtype=np.float64)
+    mask = np.ones(length, dtype=np.int64)
+    dna_mask = np.ones(length, dtype=np.int64)
+    chain_labels_arr = np.asarray(chain_labels, dtype=np.int64)
+    true_arr = np.asarray(true_sequence, dtype=np.int64)
 
     np.savez_compressed(
         canonical_npz_path,
         predicted_ppm=predicted_ppm,
-        true_sequence=true_dna,
+        true_sequence=true_arr,
         mask=mask,
         dna_mask=dna_mask,
-        chain_labels=chain_labels,
+        chain_labels=chain_labels_arr,
         source_method=np.array("deeppbs"),
     )
 
     return {
         "predicted_ppm": predicted_ppm.tolist(),
-        "true_sequence": true_dna.tolist(),
+        "true_sequence": true_arr.tolist(),
         "mask": mask.tolist(),
         "dna_mask": dna_mask.tolist(),
-        "chain_labels": chain_labels.tolist(),
+        "chain_labels": chain_labels_arr.tolist(),
     }
 
 
@@ -238,13 +236,17 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
         env["PYTHONNOUSERSITE"] = "1"
         configured_x3dna_bin_path = config.get("x3dna_bin_path")
         default_x3dna_bin_path = os.path.join(repo_path, "dependencies", "bin")
+        x3dna_env_root = os.environ.get("X3DNA")
         x3dna_bin_paths: list[str] = []
         if configured_x3dna_bin_path:
             x3dna_bin_paths.append(os.path.abspath(configured_x3dna_bin_path))
         x3dna_bin_paths.append(os.path.abspath(default_x3dna_bin_path))
+        if x3dna_env_root:
+            # Honor the canonical X3DNA env var (matches the x3dna-fiber tool).
+            x3dna_bin_paths.append(os.path.abspath(os.path.join(x3dna_env_root, "bin")))
         # Keep order stable while deduplicating.
         x3dna_bin_paths = list(dict.fromkeys(x3dna_bin_paths))
-        x3dna_home = config.get("x3dna_home")
+        x3dna_home = config.get("x3dna_home") or x3dna_env_root
         if not x3dna_home:
             x3dna_home = os.path.join(
                 repo_path,

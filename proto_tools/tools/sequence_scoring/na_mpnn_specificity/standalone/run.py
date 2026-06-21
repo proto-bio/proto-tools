@@ -23,13 +23,26 @@ _DEFAULT_RESTYPE_TO_INT = {
 
 
 def _resolve_na_mpnn_repo(repo_path: str | None) -> str:
-    """Resolve a local NA-MPNN checkout containing ``inference/run.py``."""
+    """Resolve a local NA-MPNN checkout containing ``inference/run.py``.
+
+    Resolution order: explicit config value, then the ``NA_MPNN_REPO_PATH`` environment
+    variable, then the resolved tool weights/model cache. Raises when none is usable.
+    """
     candidates: list[str] = []
     if repo_path:
         candidates.append(repo_path)
     env_repo = os.environ.get("NA_MPNN_REPO_PATH")
     if env_repo:
         candidates.append(env_repo)
+    try:
+        from standalone_helpers import resolve_weights_dir
+
+        resolved = resolve_weights_dir("na_mpnn_specificity")
+        if resolved:
+            candidates.append(resolved)
+    except Exception as exc:  # resolve_weights_dir is best-effort here
+        logger.debug("resolve_weights_dir('na_mpnn_specificity') unavailable: %s", exc)
+
     for candidate in candidates:
         if candidate and os.path.isfile(os.path.join(candidate, "inference", "run.py")):
             return os.path.abspath(candidate)

@@ -125,6 +125,29 @@ def test_canonicalize_npz_masks_unknown_true_base(tmp_path):
     assert payload["true_sequence"] == [0]  # placeholder; ignored because mask=0
 
 
+# -- Path resolution -------------------------------------------------------------------
+
+
+def test_resolve_repo_from_weights_cache(tmp_path, monkeypatch):
+    """The NA-MPNN repo resolves from the managed weights cache (PROTO_*_WEIGHTS_DIR)."""
+    repo = tmp_path / "cached_na_mpnn"
+    (repo / "inference").mkdir(parents=True)
+    (repo / "inference" / "run.py").write_text("")
+    monkeypatch.setenv("PROTO_NA_MPNN_SPECIFICITY_WEIGHTS_DIR", str(repo))
+
+    resolved = _standalone_run._resolve_na_mpnn_repo(None)
+    assert Path(resolved).samefile(repo)
+
+
+def test_resolve_repo_missing_raises(tmp_path, monkeypatch):
+    """With nothing configured, repo resolution raises an actionable error."""
+    monkeypatch.delenv("NA_MPNN_REPO_PATH", raising=False)
+    monkeypatch.delenv("PROTO_NA_MPNN_SPECIFICITY_WEIGHTS_DIR", raising=False)
+    monkeypatch.setenv("PROTO_MODEL_CACHE", str(tmp_path / "empty_cache"))
+    with pytest.raises(FileNotFoundError, match="could not locate an NA-MPNN repository"):
+        _standalone_run._resolve_na_mpnn_repo(None)
+
+
 # -- Dispatch (mocked) -----------------------------------------------------------------
 
 

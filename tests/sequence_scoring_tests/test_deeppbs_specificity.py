@@ -226,13 +226,11 @@ def test_fallback_canonical_from_pdb_builds_uniform_ppm(tmp_path):
 
     payload = _fallback_canonical_from_pdb(str(out_path), str(pdb_path))
 
-    # Doubled forward + reverse-complement strand layout, matching the real path.
-    # Forward DA,DC -> [0, 1]; reverse-complement strand -> [2, 3] (G, T).
-    assert payload["true_sequence"] == [0, 1, 2, 3]
-    assert payload["chain_labels"] == [0, 0, 1, 1]
-    assert payload["mask"] == [1, 1, 1, 1]
-    assert payload["dna_mask"] == [1, 1, 1, 1]
-    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]] * 4
+    assert payload["true_sequence"] == [0, 1]  # DA -> 0, DC -> 1
+    assert payload["chain_labels"] == [0, 0]
+    assert payload["mask"] == [1, 1]
+    assert payload["dna_mask"] == [1, 1]
+    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25], [0.25, 0.25, 0.25, 0.25]]
     assert out_path.exists()
 
 
@@ -248,9 +246,8 @@ def test_fallback_canonical_handles_no_dna_residues(tmp_path):
 
     payload = _fallback_canonical_from_pdb(str(out_path), str(pdb_path))
 
-    # Degenerate placeholder base, still doubled to the canonical fwd+RC layout.
-    assert payload["true_sequence"] == [0, 3]
-    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]] * 2
+    assert payload["true_sequence"] == [0]
+    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]]
 
 
 # ── Runner: device threading & fail-fast (pure standalone logic) ──────────────
@@ -314,6 +311,34 @@ def test_runner_raises_when_fallback_disabled(tmp_path, monkeypatch):
                 "output_directory": str(tmp_path / "out"),
             }
         )
+
+
+def test_x3dna_env_root_binaries_are_found(tmp_path, monkeypatch):
+    """Binaries under $X3DNA/bin satisfy the dependency check (no false 'missing' report)."""
+    repo = _fake_deeppbs_repo(tmp_path)
+    pdb = _dna_pdb(tmp_path)
+    x3dna_root = tmp_path / "x3dna"
+    bindir = x3dna_root / "bin"
+    bindir.mkdir(parents=True)
+    for name in ("x3dna-dssr", "analyze"):
+        binary = bindir / name
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+    monkeypatch.setenv("X3DNA", str(x3dna_root))
+    monkeypatch.setattr(_run, "get_subprocess_device_env", lambda device: {"PATH": ""})
+
+    result = _run.run_deeppbs_specificity(
+        {
+            "pdb_paths": [str(pdb)],
+            "deeppbs_repo_path": str(repo),
+            "allow_fallback": True,
+            "output_directory": str(tmp_path / "out"),
+        }
+    )
+
+    # Got past the dependency check via $X3DNA/bin; any fallback is from the stub repo,
+    # not a "dependency missing" report.
+    assert "dependency missing" not in (result["results"][0]["fallback_reason"] or "")
 
 
 # ── Integration (real DeepPBS env; skipped by default) ────────────────────────
