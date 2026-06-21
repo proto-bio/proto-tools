@@ -100,15 +100,15 @@ def test_canonicalize_npz_transforms_to_acgt(tmp_path):
     assert out_path.exists()
 
 
-def test_canonicalize_npz_infers_unknown_true_base(tmp_path):
-    """Unknown truth tokens fall back to the argmax of the predicted PPM."""
+def test_canonicalize_npz_masks_unknown_true_base(tmp_path):
+    """Unknown truth tokens are masked out (mask=0), not backfilled from the prediction."""
     raw_path = tmp_path / "raw.npz"
     out_path = tmp_path / "canonical.npz"
 
     predicted = np.zeros((1, 30), dtype=np.float64)
     predicted[0, 21] = 0.1  # A
     predicted[0, 22] = 0.1  # C
-    predicted[0, 23] = 0.7  # G (argmax -> index 2)
+    predicted[0, 23] = 0.7  # G (would have been the argmax backfill)
     predicted[0, 24] = 0.1  # T
 
     np.savez_compressed(
@@ -121,7 +121,8 @@ def test_canonicalize_npz_infers_unknown_true_base(tmp_path):
     )
 
     payload = _standalone_run._canonicalize_npz(str(raw_path), str(out_path))
-    assert payload["true_sequence"] == [2]
+    assert payload["mask"] == [0]
+    assert payload["true_sequence"] == [0]  # placeholder; ignored because mask=0
 
 
 # -- Dispatch (mocked) -----------------------------------------------------------------

@@ -14,7 +14,6 @@ from standalone_helpers import get_logger, get_subprocess_device_env
 
 logger = get_logger(__name__)
 
-DEFAULT_REPO = "/large_storage/hielab/userspace/adititm/DeepPBS"
 _DNA_RES_TO_INT = {
     "DA": 0,
     "DC": 1,
@@ -30,6 +29,37 @@ _DNA_RES_TO_INT = {
 def _write_text(path: str, content: str) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(content)
+
+
+def _resolve_deeppbs_repo(repo_path: str | None) -> str:
+    """Resolve a local DeepPBS checkout containing ``run/predict.py``.
+
+    Resolution order: explicit config value, then the ``DEEPPBS_REPO_PATH`` environment
+    variable, then the resolved tool weights cache. Raises when none is usable.
+    """
+    candidates: list[str] = []
+    if repo_path:
+        candidates.append(repo_path)
+    env_repo = os.environ.get("DEEPPBS_REPO_PATH")
+    if env_repo:
+        candidates.append(env_repo)
+    try:
+        from standalone_helpers import resolve_weights_dir
+
+        resolved = resolve_weights_dir("deeppbs_specificity")
+        if resolved:
+            candidates.append(resolved)
+    except Exception as exc:  # resolve_weights_dir is best-effort here
+        logger.debug("resolve_weights_dir('deeppbs_specificity') unavailable: %s", exc)
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(os.path.join(candidate, "run", "predict.py")):
+            return os.path.abspath(candidate)
+    raise FileNotFoundError(
+        "deeppbs-specificity: could not locate a DeepPBS repository (with run/predict.py). Set "
+        "DeepPBSSpecificityConfig.deeppbs_repo_path or the DEEPPBS_REPO_PATH environment "
+        "variable to a checkout containing run/predict.py. Searched: " + ", ".join(candidates or ["<none>"])
+    )
 
 
 def _canonicalize_prediction(raw_npz_path: str, canonical_npz_path: str) -> dict[str, Any]:
@@ -80,11 +110,15 @@ def _canonicalize_prediction(raw_npz_path: str, canonical_npz_path: str) -> dict
 
 
 def _fallback_canonical_from_pdb(canonical_npz_path: str, pdb_path: str) -> dict[str, Any]:
-    """Build a conservative fallback canonical output from DNA residues in a PDB."""
+    """Build a conservative fallback canonical output from DNA residues in a PDB.
+
+    Emits the same forward + reverse-complement strand layout as
+    ``_canonicalize_prediction`` so the schema is identical whether or not the fallback
+    ran: ``2L`` rows, ``chain_labels`` 0 for the forward strand and 1 for the generated
+    complementary strand, and a uniform ``0.25`` PPM.
+    """
     seen = set()
-    chain_to_idx: dict[str, int] = {}
-    true_sequence: list[int] = []
-    chain_labels: list[int] = []
+    forward_bases: list[int] = []
 
     with open(pdb_path, encoding="utf-8", errors="ignore") as handle:
         for line in handle:
@@ -103,39 +137,42 @@ def _fallback_canonical_from_pdb(canonical_npz_path: str, pdb_path: str) -> dict
             if key in seen:
                 continue
             seen.add(key)
+            forward_bases.append(_DNA_RES_TO_INT[resn])
 
-            if chain_id not in chain_to_idx:
-                chain_to_idx[chain_id] = len(chain_to_idx)
-            true_sequence.append(_DNA_RES_TO_INT[resn])
-            chain_labels.append(chain_to_idx[chain_id])
+    if not forward_bases:
+        forward_bases = [0]
 
-    if not true_sequence:
-        true_sequence = [0]
-        chain_labels = [0]
+    length = len(forward_bases)
+    seq_one_hot = np.zeros((length, 4), dtype=np.float64)
+    seq_one_hot[np.arange(length), forward_bases] = 1.0
+    bp_seq = np.flip(np.flip(seq_one_hot, axis=1), axis=0)
+    seq_full = np.concatenate((seq_one_hot, bp_seq), axis=0)
 
-    length = len(true_sequence)
-    predicted_ppm = np.full((length, 4), 0.25, dtype=np.float64)
-    mask = np.ones(length, dtype=np.int64)
-    dna_mask = np.ones(length, dtype=np.int64)
-    chain_labels_arr = np.asarray(chain_labels, dtype=np.int64)
-    true_arr = np.asarray(true_sequence, dtype=np.int64)
+    true_dna = np.argmax(seq_full, axis=1).astype(np.int64)
+    chain_labels = np.concatenate(
+        (np.zeros(length, dtype=np.int64), np.ones(length, dtype=np.int64)),
+        axis=0,
+    )
+    predicted_ppm = np.full((2 * length, 4), 0.25, dtype=np.float64)
+    mask = np.ones(2 * length, dtype=np.int64)
+    dna_mask = np.ones(2 * length, dtype=np.int64)
 
     np.savez_compressed(
         canonical_npz_path,
         predicted_ppm=predicted_ppm,
-        true_sequence=true_arr,
+        true_sequence=true_dna,
         mask=mask,
         dna_mask=dna_mask,
-        chain_labels=chain_labels_arr,
+        chain_labels=chain_labels,
         source_method=np.array("deeppbs"),
     )
 
     return {
         "predicted_ppm": predicted_ppm.tolist(),
-        "true_sequence": true_arr.tolist(),
+        "true_sequence": true_dna.tolist(),
         "mask": mask.tolist(),
         "dna_mask": dna_mask.tolist(),
-        "chain_labels": chain_labels_arr.tolist(),
+        "chain_labels": chain_labels.tolist(),
     }
 
 
@@ -145,7 +182,8 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
     if not os.path.exists(pdb_path):
         raise FileNotFoundError(f"PDB path does not exist: {pdb_path}")
 
-    repo_path = os.path.abspath(config.get("deeppbs_repo_path", DEFAULT_REPO))
+    repo_path = _resolve_deeppbs_repo(config.get("deeppbs_repo_path"))
+    allow_fallback = bool(config.get("allow_fallback", False))
     process_script = os.path.join(repo_path, "run", "process_co_crystal.py")
     predict_script = os.path.join(repo_path, "run", "predict.py")
     if not os.path.exists(process_script):
@@ -223,10 +261,6 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
             binary for binary in ("x3dna-dssr", "analyze") if shutil.which(binary, path=env.get("PATH")) is None
         ]
         if missing_bins:
-            canonical_dir = os.path.join(output_root, "canonical_npz")
-            os.makedirs(canonical_dir, exist_ok=True)
-            canonical_npz = os.path.join(canonical_dir, f"{input_name}.npz")
-            fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
             fallback_reason = (
                 "DeepPBS dependency missing: "
                 + ", ".join(missing_bins)
@@ -235,6 +269,12 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
                 + ", ".join(existing_bins or x3dna_bin_paths)
                 + "."
             )
+            if not allow_fallback:
+                raise RuntimeError(fallback_reason)
+            canonical_dir = os.path.join(output_root, "canonical_npz")
+            os.makedirs(canonical_dir, exist_ok=True)
+            canonical_npz = os.path.join(canonical_dir, f"{input_name}.npz")
+            fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
             logger.warning("deeppbs_specificity fallback for %s: %s", input_name, fallback_reason)
             return {
                 "input_name": input_name,
@@ -291,7 +331,6 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
 
         preprocessed_npz = os.path.join(npz_dir, f"{input_name}.npz")
         if not os.path.exists(preprocessed_npz):
-            fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
             stdout_tail = (process_io["stdout"] or "").strip().splitlines()[-4:]
             stderr_tail = (process_io["stderr"] or "").strip().splitlines()[-4:]
             details = "; ".join(
@@ -307,6 +346,9 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
                 + (f"; {details}" if details else "")
                 + "; hint: ensure AF3 output contains a clean protein-DNA co-crystal with both DNA strands."
             )
+            if not allow_fallback:
+                raise RuntimeError(fallback_reason)
+            fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
             logger.warning("deeppbs_specificity fallback for %s: %s", input_name, fallback_reason)
             return {
                 "input_name": input_name,
@@ -330,6 +372,8 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
                 step_name="prediction",
             )
         except Exception as exc:
+            if not allow_fallback:
+                raise
             fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
             logger.warning("deeppbs_specificity fallback for %s: prediction step failed: %s", input_name, exc)
             return {
@@ -343,17 +387,17 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
 
         raw_npz = os.path.join(output_dir, "npzs", f"{input_name}.npz_predict.npz")
         if not os.path.exists(raw_npz):
+            fallback_reason = "DeepPBS prediction produced no output NPZ"
+            if not allow_fallback:
+                raise RuntimeError(fallback_reason)
             fallback = _fallback_canonical_from_pdb(canonical_npz, pdb_path)
-            logger.warning(
-                "deeppbs_specificity fallback for %s: prediction produced no output NPZ",
-                input_name,
-            )
+            logger.warning("deeppbs_specificity fallback for %s: %s", input_name, fallback_reason)
             return {
                 "input_name": input_name,
                 "source_method": "deeppbs",
                 "output_npz_path": canonical_npz,
                 "used_fallback": True,
-                "fallback_reason": "DeepPBS prediction produced no output NPZ",
+                "fallback_reason": fallback_reason,
                 **fallback,
             }
 
@@ -382,13 +426,15 @@ def run_deeppbs_specificity(input_data: dict[str, Any]) -> dict[str, Any]:
         os.makedirs(output_root, exist_ok=True)
 
     config = {
-        "deeppbs_repo_path": input_data.get("deeppbs_repo_path", DEFAULT_REPO),
+        "deeppbs_repo_path": input_data.get("deeppbs_repo_path"),
         "process_config_path": input_data.get("process_config_path"),
         "prediction_config_path": input_data.get("prediction_config_path"),
         "x3dna_bin_path": input_data.get("x3dna_bin_path"),
         "x3dna_home": input_data.get("x3dna_home"),
         "keep_intermediate": bool(input_data.get("keep_intermediate", False)),
         "no_clean_protein": bool(input_data.get("no_clean_protein", False)),
+        "allow_fallback": bool(input_data.get("allow_fallback", False)),
+        "device": str(input_data.get("device", "cuda")),
         "verbose": bool(input_data.get("verbose", False)),
     }
 

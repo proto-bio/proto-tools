@@ -3,12 +3,16 @@
 Tests for DeepPBS specificity tool wrapper, canonicalization, and fallback.
 """
 
+import importlib
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
 
+import proto_tools.utils.standalone_helpers_source as _shs
 from proto_tools.tools.sequence_scoring.deeppbs_specificity import (
     DeepPBSSpecificityConfig,
     DeepPBSSpecificityInput,
@@ -16,6 +20,12 @@ from proto_tools.tools.sequence_scoring.deeppbs_specificity import (
 )
 from proto_tools.tools.tool_registry import ToolRegistry
 from tests.tool_infra_tests.test_export_functionality import validate_output
+
+# The standalone run.py imports the worker-injected ``standalone_helpers`` package,
+# which only sits on sys.path inside a tool venv. Add its source dir so the pure
+# canonicalization/runner logic can be imported and unit-tested on the host.
+sys.path.insert(0, str(Path(next(iter(_shs.__path__)))))
+_run = importlib.import_module("proto_tools.tools.sequence_scoring.deeppbs_specificity.standalone.run")
 
 # ── Registration ──────────────────────────────────────────────────────────────
 
@@ -48,11 +58,12 @@ def test_input_rejects_extra_fields():
         DeepPBSSpecificityInput(pdb_paths=["one.pdb"], extra_field="x")
 
 
-def test_config_defaults_resolve_local_paths():
-    """Config exposes machine-local DeepPBS + X3DNA defaults."""
+def test_config_path_defaults_are_unset():
+    """Path configs default to None (resolved from env/cache at runtime), not a hardcoded checkout."""
     cfg = DeepPBSSpecificityConfig()
-    assert cfg.deeppbs_repo_path.endswith("DeepPBS")
-    assert cfg.x3dna_bin_path is not None and cfg.x3dna_bin_path.endswith("DSSR")
+    assert cfg.deeppbs_repo_path is None
+    assert cfg.x3dna_bin_path is None
+    assert cfg.allow_fallback is False
 
 
 def test_config_cloud_unsupported():
@@ -94,6 +105,35 @@ def test_run_calls_dispatch_and_returns_output(mock_dispatch):
     assert output.results[0].true_sequence == [0, 1]
     assert output.results[0].used_fallback is False
     mock_dispatch.assert_called_once()
+
+
+@patch("proto_tools.tools.sequence_scoring.deeppbs_specificity.deeppbs_specificity.ToolInstance.dispatch")
+def test_run_threads_device_and_fallback_flag_into_payload(mock_dispatch):
+    """The wrapper forwards config.device and allow_fallback in the dispatch payload (cpu-bug regression)."""
+    mock_dispatch.return_value = {
+        "results": [
+            {
+                "input_name": "candidate_0",
+                "source_method": "deeppbs",
+                "output_npz_path": "candidate_0.npz",
+                "predicted_ppm": [[0.25, 0.25, 0.25, 0.25]],
+                "true_sequence": [0],
+                "mask": [1],
+                "dna_mask": [1],
+                "chain_labels": [0],
+                "used_fallback": False,
+                "fallback_reason": None,
+            }
+        ]
+    }
+
+    run_deeppbs_specificity(
+        DeepPBSSpecificityInput(pdb_paths=["candidate_0.pdb"]),
+        DeepPBSSpecificityConfig(device="cpu"),
+    )
+    payload = mock_dispatch.call_args.args[1]
+    assert payload["device"] == "cpu"
+    assert payload["allow_fallback"] is False
 
 
 @patch("proto_tools.tools.sequence_scoring.deeppbs_specificity.deeppbs_specificity.ToolInstance.dispatch")
@@ -186,11 +226,13 @@ def test_fallback_canonical_from_pdb_builds_uniform_ppm(tmp_path):
 
     payload = _fallback_canonical_from_pdb(str(out_path), str(pdb_path))
 
-    assert payload["true_sequence"] == [0, 1]  # DA -> 0, DC -> 1
-    assert payload["chain_labels"] == [0, 0]
-    assert payload["mask"] == [1, 1]
-    assert payload["dna_mask"] == [1, 1]
-    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25], [0.25, 0.25, 0.25, 0.25]]
+    # Doubled forward + reverse-complement strand layout, matching the real path.
+    # Forward DA,DC -> [0, 1]; reverse-complement strand -> [2, 3] (G, T).
+    assert payload["true_sequence"] == [0, 1, 2, 3]
+    assert payload["chain_labels"] == [0, 0, 1, 1]
+    assert payload["mask"] == [1, 1, 1, 1]
+    assert payload["dna_mask"] == [1, 1, 1, 1]
+    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]] * 4
     assert out_path.exists()
 
 
@@ -206,8 +248,72 @@ def test_fallback_canonical_handles_no_dna_residues(tmp_path):
 
     payload = _fallback_canonical_from_pdb(str(out_path), str(pdb_path))
 
-    assert payload["true_sequence"] == [0]
-    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]]
+    # Degenerate placeholder base, still doubled to the canonical fwd+RC layout.
+    assert payload["true_sequence"] == [0, 3]
+    assert payload["predicted_ppm"] == [[0.25, 0.25, 0.25, 0.25]] * 2
+
+
+# ── Runner: device threading & fail-fast (pure standalone logic) ──────────────
+
+
+def _fake_deeppbs_repo(tmp_path) -> Path:
+    """Create a minimal DeepPBS repo skeleton so the runner's existence checks pass."""
+    repo = tmp_path / "DeepPBS"
+    (repo / "run" / "process" / "pred_configs").mkdir(parents=True)
+    (repo / "run" / "process_co_crystal.py").write_text("")
+    (repo / "run" / "predict.py").write_text("")
+    (repo / "run" / "process" / "process_config.json").write_text("{}")
+    (repo / "run" / "process" / "pred_configs" / "pred_config_deeppbs.json").write_text("{}")
+    return repo
+
+
+def _dna_pdb(tmp_path) -> Path:
+    pdb = tmp_path / "complex.pdb"
+    pdb.write_text("ATOM      2  P    DA B   1       1.000   1.000   1.000  1.00  0.00           P\n")
+    return pdb
+
+
+def test_runner_threads_configured_device(tmp_path, monkeypatch):
+    """config.device reaches get_subprocess_device_env (regression for the cpu device bug)."""
+    repo = _fake_deeppbs_repo(tmp_path)
+    pdb = _dna_pdb(tmp_path)
+
+    seen = {}
+
+    def fake_env(device):
+        seen["device"] = device
+        return {"PATH": ""}  # no x3dna binaries -> hits the missing-deps branch
+
+    monkeypatch.setattr(_run, "get_subprocess_device_env", fake_env)
+
+    result = _run.run_deeppbs_specificity(
+        {
+            "pdb_paths": [str(pdb)],
+            "deeppbs_repo_path": str(repo),
+            "device": "cpu",
+            "allow_fallback": True,
+            "output_directory": str(tmp_path / "out"),
+        }
+    )
+
+    assert seen["device"] == "cpu"
+    assert result["results"][0]["used_fallback"] is True
+
+
+def test_runner_raises_when_fallback_disabled(tmp_path, monkeypatch):
+    """With allow_fallback False (default), a missing dependency raises instead of faking a PPM."""
+    repo = _fake_deeppbs_repo(tmp_path)
+    pdb = _dna_pdb(tmp_path)
+    monkeypatch.setattr(_run, "get_subprocess_device_env", lambda device: {"PATH": ""})
+
+    with pytest.raises(RuntimeError, match="DeepPBS dependency missing"):
+        _run.run_deeppbs_specificity(
+            {
+                "pdb_paths": [str(pdb)],
+                "deeppbs_repo_path": str(repo),
+                "output_directory": str(tmp_path / "out"),
+            }
+        )
 
 
 # ── Integration (real DeepPBS env; skipped by default) ────────────────────────

@@ -20,9 +20,6 @@ from proto_tools.utils import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_NA_MPNN_REPO_PATH = "/large_storage/hielab/userspace/adititm/NA-MPNN"
-DEFAULT_NA_MPNN_CHECKPOINT_PATH = "/large_storage/hielab/userspace/adititm/NA-MPNN/models/specificity_model/s_70114.pt"
-
 
 # ============================================================================
 # Input
@@ -150,8 +147,10 @@ class NAMPNNSpecificityConfig(BaseConfig):
     """Configuration for NA-MPNN specificity prediction.
 
     Attributes:
-        na_mpnn_repo_path (str): Path to the local NA-MPNN repository checkout.
-        checkpoint_path (str): Path to the NA-MPNN specificity checkpoint weights.
+        na_mpnn_repo_path (str | None): Local NA-MPNN checkout. Resolved from this
+            value, then $NA_MPNN_REPO_PATH.
+        checkpoint_path (str | None): NA-MPNN specificity checkpoint. Resolved from
+            this value, then $NA_MPNN_CHECKPOINT_PATH, then the weights cache.
         batch_size (int): Batch size per inference call.
         number_of_batches (int): Number of prediction batches to run.
         temperature (float): Sampling temperature for NA-MPNN.
@@ -168,16 +167,16 @@ class NAMPNNSpecificityConfig(BaseConfig):
         description="Device to run NA-MPNN inference on",
         include_in_key=False,
     )
-    na_mpnn_repo_path: str = ConfigField(
+    na_mpnn_repo_path: str | None = ConfigField(
         title="NA-MPNN Repo Path",
-        default=DEFAULT_NA_MPNN_REPO_PATH,
-        description="Path to the local NA-MPNN repository checkout",
+        default=None,
+        description="Local NA-MPNN checkout; resolved from this value, then $NA_MPNN_REPO_PATH",
         reload_on_change=True,
     )
-    checkpoint_path: str = ConfigField(
+    checkpoint_path: str | None = ConfigField(
         title="NA-MPNN Checkpoint",
-        default=DEFAULT_NA_MPNN_CHECKPOINT_PATH,
-        description="Path to the NA-MPNN specificity checkpoint weights",
+        default=None,
+        description="NA-MPNN specificity checkpoint; from config, $NA_MPNN_CHECKPOINT_PATH, or the weights cache",
         reload_on_change=True,
     )
     batch_size: int = ConfigField(

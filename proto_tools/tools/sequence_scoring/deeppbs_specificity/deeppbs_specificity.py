@@ -20,10 +20,6 @@ from proto_tools.utils import (
 
 logger = logging.getLogger(__name__)
 
-# Machine-local DeepPBS repository and X3DNA binary directory (overridable via config).
-DEFAULT_DEEPPBS_REPO_PATH = "/large_storage/hielab/userspace/adititm/DeepPBS"
-DEFAULT_X3DNA_BIN_PATH = "/large_storage/hielab/userspace/adititm/DSSR"
-
 
 class DeepPBSSpecificityInput(BaseToolInput):
     """Input for DeepPBS specificity prediction.
@@ -60,14 +56,14 @@ class DeepPBSSpecificityConfig(BaseConfig):
     """Configuration for DeepPBS specificity prediction.
 
     Attributes:
-        deeppbs_repo_path (str): Path to the local DeepPBS repository. Defaults to
-            the machine-local checkout; override to point elsewhere.
+        deeppbs_repo_path (str | None): Local DeepPBS checkout. Resolved from this
+            value, then $DEEPPBS_REPO_PATH, then the weights cache.
         process_config_path (str | None): Optional path to a DeepPBS process config
             JSON. Defaults to the repo's bundled process config.
         prediction_config_path (str | None): Optional path to a DeepPBS predict
             config JSON. Defaults to the repo's bundled predict config.
         x3dna_bin_path (str | None): Optional directory containing x3dna-dssr and
-            analyze binaries. Defaults to the machine-local X3DNA/DSSR install.
+            analyze binaries. Falls back to <repo>/dependencies/bin.
         x3dna_home (str | None): Optional X3DNA home directory used during DeepPBS
             preprocessing.
         output_directory (str | None): Optional directory for canonical NPZ
@@ -75,6 +71,8 @@ class DeepPBSSpecificityConfig(BaseConfig):
         keep_intermediate (bool): Keep intermediate process and predict files.
         no_clean_protein (bool): Pass --no_cleanp to DeepPBS preprocessing to skip
             pdb2pqr-dependent protein cleaning.
+        allow_fallback (bool): On missing DeepPBS deps/outputs, return a uniform
+            fallback PPM instead of raising.
         device (str): Device to run DeepPBS inference on (inherited).
     """
 
@@ -84,10 +82,10 @@ class DeepPBSSpecificityConfig(BaseConfig):
         description="Device to run DeepPBS inference on",
         include_in_key=False,
     )
-    deeppbs_repo_path: str = ConfigField(
+    deeppbs_repo_path: str | None = ConfigField(
         title="DeepPBS Repo Path",
-        default=DEFAULT_DEEPPBS_REPO_PATH,
-        description="Path to the local DeepPBS repository",
+        default=None,
+        description="Local DeepPBS checkout; resolved from this value, then $DEEPPBS_REPO_PATH, then the weights cache",
         reload_on_change=True,
     )
     process_config_path: str | None = ConfigField(
@@ -102,8 +100,8 @@ class DeepPBSSpecificityConfig(BaseConfig):
     )
     x3dna_bin_path: str | None = ConfigField(
         title="X3DNA Bin Path",
-        default=DEFAULT_X3DNA_BIN_PATH,
-        description="Directory containing x3dna-dssr/analyze binaries",
+        default=None,
+        description="Directory with x3dna-dssr/analyze binaries; falls back to <repo>/dependencies/bin",
     )
     x3dna_home: str | None = ConfigField(
         title="X3DNA Home",
@@ -126,6 +124,12 @@ class DeepPBSSpecificityConfig(BaseConfig):
         title="Skip Protein Cleaning",
         default=False,
         description="Pass --no_cleanp to skip pdb2pqr-dependent protein cleaning",
+    )
+    allow_fallback: bool = ConfigField(
+        title="Allow Fallback",
+        default=False,
+        description="On missing DeepPBS deps/outputs, return a uniform fallback PPM instead of raising",
+        include_in_key=False,
     )
 
     def cloud_unsupported_reason(self) -> str | None:
@@ -314,6 +318,8 @@ def run_deeppbs_specificity(
         "output_directory": config.output_directory,
         "keep_intermediate": config.keep_intermediate,
         "no_clean_protein": config.no_clean_protein,
+        "allow_fallback": config.allow_fallback,
+        "device": config.device,
         "verbose": config.verbose,
     }
 

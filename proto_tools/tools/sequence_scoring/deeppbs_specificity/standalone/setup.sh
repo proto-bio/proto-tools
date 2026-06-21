@@ -29,8 +29,8 @@ echo "Installing DeepPBS Python dependencies from requirements.txt..."
 uv pip install -r requirements.txt
 uv pip install pdb2pqr
 
-DEEPPBS_REPO_PATH="${DEEPPBS_REPO_PATH:-/large_storage/hielab/userspace/adititm/DeepPBS}"
-if [[ -d "${DEEPPBS_REPO_PATH}" ]]; then
+DEEPPBS_REPO_PATH="${DEEPPBS_REPO_PATH:-}"
+if [[ -n "${DEEPPBS_REPO_PATH}" && -d "${DEEPPBS_REPO_PATH}" ]]; then
   echo "Installing deeppbs package from ${DEEPPBS_REPO_PATH}..."
   uv pip install -e "${DEEPPBS_REPO_PATH}"
 fi

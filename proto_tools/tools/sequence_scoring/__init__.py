@@ -52,8 +52,6 @@ from proto_tools.tools.sequence_scoring.borzoi import (
     run_borzoi_ensemble,
 )
 from proto_tools.tools.sequence_scoring.deeppbs_specificity import (
-    DEFAULT_DEEPPBS_REPO_PATH,
-    DEFAULT_X3DNA_BIN_PATH,
     DeepPBSSpecificityConfig,
     DeepPBSSpecificityInput,
     DeepPBSSpecificityOutput,
@@ -242,8 +240,6 @@ __all__ = [
     "SegmaskerOutput",
     "run_segmasker",
     # DeepPBS Specificity
-    "DEFAULT_DEEPPBS_REPO_PATH",
-    "DEFAULT_X3DNA_BIN_PATH",
     "DeepPBSSpecificityInput",
     "DeepPBSSpecificityConfig",
     "DeepPBSSpecificityResult",

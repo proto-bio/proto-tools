@@ -14,13 +14,58 @@ from standalone_helpers import get_logger, get_subprocess_device_env
 
 logger = get_logger(__name__)
 
-DEFAULT_REPO = "/large_storage/hielab/userspace/adititm/NA-MPNN"
 _DEFAULT_RESTYPE_TO_INT = {
     "DA": 21,
     "DC": 22,
     "DG": 23,
     "DT": 24,
 }
+
+
+def _resolve_na_mpnn_repo(repo_path: str | None) -> str:
+    """Resolve a local NA-MPNN checkout containing ``inference/run.py``."""
+    candidates: list[str] = []
+    if repo_path:
+        candidates.append(repo_path)
+    env_repo = os.environ.get("NA_MPNN_REPO_PATH")
+    if env_repo:
+        candidates.append(env_repo)
+    for candidate in candidates:
+        if candidate and os.path.isfile(os.path.join(candidate, "inference", "run.py")):
+            return os.path.abspath(candidate)
+    raise FileNotFoundError(
+        "na-mpnn-specificity: could not locate an NA-MPNN repository (with inference/run.py). Set "
+        "NAMPNNSpecificityConfig.na_mpnn_repo_path or the NA_MPNN_REPO_PATH environment "
+        "variable to a checkout containing inference/run.py. Searched: " + ", ".join(candidates or ["<none>"])
+    )
+
+
+def _resolve_checkpoint(checkpoint_path: str | None) -> str:
+    """Resolve the NA-MPNN specificity checkpoint (``.pt``)."""
+    candidates: list[str] = []
+    if checkpoint_path:
+        candidates.append(checkpoint_path)
+    env_ckpt = os.environ.get("NA_MPNN_CHECKPOINT_PATH")
+    if env_ckpt:
+        candidates.append(env_ckpt)
+    try:
+        from standalone_helpers import resolve_weights_dir
+
+        weights_dir = resolve_weights_dir("na_mpnn_specificity")
+        if weights_dir:
+            candidates.extend(sorted(str(path) for path in Path(weights_dir).glob("*.pt")))
+    except Exception as exc:  # resolve_weights_dir is best-effort here
+        logger.debug("resolve_weights_dir('na_mpnn_specificity') unavailable: %s", exc)
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    raise FileNotFoundError(
+        "na-mpnn-specificity: could not locate a specificity checkpoint (.pt). Set "
+        "NAMPNNSpecificityConfig.checkpoint_path or the NA_MPNN_CHECKPOINT_PATH environment "
+        "variable (or place the .pt under PROTO_NA_MPNN_SPECIFICITY_WEIGHTS_DIR). Searched: "
+        + ", ".join(candidates or ["<none>"])
+    )
 
 
 def _load_restype_to_int(npz_data: Any) -> dict[str, int]:
@@ -69,13 +114,16 @@ def _canonicalize_npz(raw_npz_path: str, canonical_npz_path: str) -> dict[str, A
     }
     true_dna = np.array([na_to_dna.get(int(x), -1) for x in true_selected], dtype=np.int64)
 
-    unknown = np.where(true_dna < 0)[0]
-    if unknown.size:
-        true_dna[unknown] = np.argmax(pred_dna[unknown], axis=1)
-
     chain_selected = chain_labels[selected]
     canonical_mask = np.ones(pred_dna.shape[0], dtype=np.int64)
     canonical_dna_mask = np.ones(pred_dna.shape[0], dtype=np.int64)
+
+    # Positions whose ground-truth base isn't a known DNA token are masked out rather
+    # than backfilled from the prediction (which would inflate recovery/accuracy).
+    unknown = np.where(true_dna < 0)[0]
+    if unknown.size:
+        canonical_mask[unknown] = 0
+        true_dna[unknown] = 0
 
     np.savez_compressed(
         canonical_npz_path,
@@ -102,14 +150,12 @@ def _run_one_structure(pdb_path: str, config: dict[str, Any], output_root: str) 
     if not os.path.exists(pdb_path):
         raise FileNotFoundError(f"PDB path does not exist: {pdb_path}")
 
-    repo_path = os.path.abspath(config.get("na_mpnn_repo_path", DEFAULT_REPO))
-    checkpoint_path = os.path.abspath(config["checkpoint_path"])
+    repo_path = _resolve_na_mpnn_repo(config.get("na_mpnn_repo_path"))
+    checkpoint_path = _resolve_checkpoint(config.get("checkpoint_path"))
 
     run_script = os.path.join(repo_path, "inference", "run.py")
     if not os.path.exists(run_script):
         raise FileNotFoundError(f"NA-MPNN run script not found: {run_script}")
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"NA-MPNN checkpoint not found: {checkpoint_path}")
 
     input_name = Path(pdb_path).stem
     raw_dir = os.path.join(output_root, "na_mpnn_raw", input_name)
@@ -206,8 +252,8 @@ def run_na_mpnn_specificity(input_data: dict[str, Any]) -> dict[str, Any]:
         os.makedirs(output_root, exist_ok=True)
 
     config = {
-        "na_mpnn_repo_path": input_data.get("na_mpnn_repo_path", DEFAULT_REPO),
-        "checkpoint_path": input_data["checkpoint_path"],
+        "na_mpnn_repo_path": input_data.get("na_mpnn_repo_path"),
+        "checkpoint_path": input_data.get("checkpoint_path"),
         "batch_size": int(input_data.get("batch_size", 1)),
         "number_of_batches": int(input_data.get("number_of_batches", 1)),
         "temperature": float(input_data.get("temperature", 0.1)),

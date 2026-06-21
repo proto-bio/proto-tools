@@ -22,7 +22,7 @@ Sequence-specific recognition of [DNA](https://en.wikipedia.org/wiki/DNA) by pro
 
 ### DeepPBS Specificity (`deeppbs-specificity`)
 
-Runs DeepPBS preprocessing and prediction on each input protein-DNA structure and returns, per structure, a canonical DNA PPM (`L x 4`, `A,C,G,T` order), the true DNA sequence indices, residue and DNA masks, per-base chain labels, and the path to a canonical `.npz` artifact. When a required DeepPBS dependency (the X3DNA `x3dna-dssr`/`analyze` binaries) is missing, or preprocessing or prediction fails to produce output, the tool emits a conservative fallback result: a uniform PPM (`0.25` per base) derived from the DNA residues in the input PDB, flagged with `used_fallback=True` and a human-readable `fallback_reason`.
+Runs DeepPBS preprocessing and prediction on each input protein-DNA structure and returns, per structure, a canonical DNA PPM (`L x 4`, `A,C,G,T` order), the true DNA sequence indices, residue and DNA masks, per-base chain labels, and the path to a canonical `.npz` artifact. When a required DeepPBS dependency (the X3DNA `x3dna-dssr`/`analyze` binaries) is missing, or preprocessing or prediction fails to produce output, the tool raises by default. Set `allow_fallback=True` to instead emit a conservative fallback result: a uniform PPM (`0.25` per base) derived from the DNA residues in the input PDB, flagged with `used_fallback=True` and a human-readable `fallback_reason`.
 
 #### Applications
 
@@ -33,13 +33,13 @@ Runs DeepPBS preprocessing and prediction on each input protein-DNA structure an
 #### Usage Tips
 
 - **Inputs are full protein-DNA PDB structures.** Provide a clean co-crystal containing both DNA strands; missing strands or non-standard residues can trigger the fallback path.
-- **A local DeepPBS repository and X3DNA install are required.** Set `deeppbs_repo_path` and `x3dna_bin_path` to point at your local installs; defaults target the machine-local checkouts.
-- **Always check `used_fallback`.** A `used_fallback=True` result carries a uniform PPM, not a real prediction.
+- **A local DeepPBS repository and X3DNA install are required.** Set `deeppbs_repo_path` and `x3dna_bin_path` (or the `DEEPPBS_REPO_PATH` environment variable) to point at your local installs; there are no built-in path defaults.
+- **Fallback is opt-in.** By default a missing dependency or failed run raises; pass `allow_fallback=True` to get a uniform fallback PPM instead. A `used_fallback=True` result carries a uniform PPM, not a real prediction.
 
 ## Toolkit Notes
 
 <a href="https://bio-pro.mintlify.app/tools/guides/tool-persistence"><img src="https://img.shields.io/badge/Tool_Persistence_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Tool Persistence guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/device-management"><img src="https://img.shields.io/badge/Device_Management_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Device Management guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/parallel-execution"><img src="https://img.shields.io/badge/Parallel_Execution_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Parallel Execution guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/cloud-inference"><img src="https://img.shields.io/badge/Cloud_Inference_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Cloud Inference guide"></a>
 
 - **A local DeepPBS repository and X3DNA install are required.** The tool shells out to local DeepPBS scripts and X3DNA binaries; it cannot run on `device='cloud'`.
-- **Failures fall back, not crash.** When a dependency is missing or processing fails, the tool returns a uniform fallback PPM flagged with `used_fallback`, so downstream code can filter or re-run.
+- **Failures raise by default.** When a dependency is missing or processing fails, the tool raises; set `allow_fallback=True` to instead return a uniform fallback PPM flagged with `used_fallback` so downstream code can filter or re-run.
 - **Results are index-aligned with the input.** Each result corresponds to the input structure at the same position.
