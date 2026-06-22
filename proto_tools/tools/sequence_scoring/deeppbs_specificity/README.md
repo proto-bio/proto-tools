@@ -7,11 +7,11 @@
 
 ## Overview
 
-DeepPBS (Deep Protein-DNA Binding Specificity) predicts the DNA base preferences of a protein directly from a protein-DNA complex structure. Given one or more PDB files, the `deeppbs-specificity` tool runs DeepPBS over each structure and returns a canonical DNA-only position probability matrix (PPM) in `A,C,G,T` order, alongside the true DNA sequence, residue masks, and per-base chain labels.
+DeepPBS (Deep Predictor of Binding Specificity) predicts the DNA base preferences of a protein directly from a protein-DNA complex structure. Given one or more PDB files, the `deeppbs-specificity` tool runs DeepPBS over each structure and returns a canonical DNA-only position probability matrix (PPM) in `A,C,G,T` order, alongside the true DNA sequence, residue masks, and per-base chain labels.
 
 ## Background
 
-Sequence-specific recognition of [DNA](https://en.wikipedia.org/wiki/DNA) by proteins underlies transcriptional regulation, and predicting a [protein](https://en.wikipedia.org/wiki/Protein)'s binding preference directly from a co-crystal structure is a long-standing goal. DeepPBS ([Mitra et al., 2024](https://doi.org/10.1038/s41592-024-02372-w)) applies [geometric deep learning](https://en.wikipedia.org/wiki/Geometric_deep_learning) over a graph representation of the protein-DNA interface to predict per-position base preferences, generalizing across protein families without requiring family-specific training. The model consumes a processed representation of the complex built from [DSSR/X3DNA](https://en.wikipedia.org/wiki/Nucleic_acid_structure_determination) geometry, so the wrapper depends on a local DeepPBS repository and a local X3DNA install.
+Sequence-specific recognition of [DNA](https://en.wikipedia.org/wiki/DNA) by proteins underlies transcriptional regulation, and predicting a [protein](https://en.wikipedia.org/wiki/Protein)'s binding preference directly from a co-crystal structure is a long-standing goal. DeepPBS ([Mitra et al., 2024](https://doi.org/10.1038/s41592-024-02372-w)) applies [geometric deep learning](https://en.wikipedia.org/wiki/Geometric_deep_learning) over a graph representation of the protein-DNA interface to predict per-position base preferences that generalize across protein families, on experimental or predicted complex structures. The model consumes a processed representation of the complex built from [DSSR/X3DNA](https://en.wikipedia.org/wiki/Nucleic_acid_structure_determination) geometry, so the wrapper depends on a local DeepPBS repository and a local X3DNA install.
 
 ### Learning Resources
 

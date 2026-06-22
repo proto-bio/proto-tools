@@ -7,13 +7,13 @@
 
 ## Overview
 
-[NA-MPNN](https://github.com/baker-laboratory/NA-MPNN) is a message-passing neural network for nucleic-acid sequence design and protein–DNA specificity prediction. Given a protein–DNA complex structure, the specificity mode predicts, for each DNA position, the base preference of the bound protein. This toolkit exposes that specificity prediction as a single tool that returns a canonical DNA-only position probability matrix (PPM) in `A,C,G,T` order.
+[NA-MPNN](https://github.com/baker-laboratory/NA-MPNN) is a message-passing neural network for nucleic-acid sequence design and protein–DNA specificity prediction. Given a protein–DNA complex structure, it predicts, for each DNA position, the base preference of the bound protein. This toolkit exposes that specificity prediction as a single tool that returns a canonical DNA-only position probability matrix (PPM) in `A,C,G,T` order.
 
 ## Background
 
 Sequence-specific DNA-binding proteins recognize their target sites through a combination of direct base contacts and indirect shape readout. Predicting the base preference a protein imposes at each position of a bound DNA site is central to engineering transcription factors, characterizing binding specificity, and designing synthetic regulatory elements such as repressors and promoters.
 
-NA-MPNN ([Kubaney et al., 2025](https://www.biorxiv.org/content/10.1101/2025.10.03.679414v2)) extends the inverse-folding message-passing architecture popularized by ProteinMPNN and LigandMPNN to nucleic acids, supporting RNA sequence design and protein–DNA specificity prediction from structure. In specificity mode, the model conditions on the full protein–DNA complex and emits per-position nucleotide probabilities over the DNA chains, which this toolkit canonicalizes into a DNA-only `L x 4` PPM together with the recovered true sequence and chain labels.
+NA-MPNN ([Kubaney et al., 2025](https://www.biorxiv.org/content/10.1101/2025.10.03.679414v2)) is a message-passing neural network that represents proteins, DNA, and RNA within a single unified biopolymer graph, framing both RNA sequence design and protein–DNA binding specificity as nucleic-acid inverse-folding problems (recovering likely sequences for a fixed three-dimensional structure). For specificity prediction, the model conditions on a fixed-docked protein–DNA complex and emits per-position nucleotide probabilities over the DNA chains, which this toolkit canonicalizes into a DNA-only `L x 4` PPM together with the recovered true sequence and chain labels.
 
 ### Learning Resources
 
