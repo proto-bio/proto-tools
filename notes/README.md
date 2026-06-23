@@ -18,6 +18,7 @@ signatures and behavior.
 - `storage.md`: `PROTO_HOME`, `PROTO_MODEL_CACHE`, where model weights live, shared weights, and per-tool overrides.
 - `tool-environments.md`: how isolated tool environments are built, plus compute dependency management (GCC/nvcc), caches, binaries, overriding a tool's packaged env, and the `to_device()` protocol.
 - `troubleshooting.md`: working around cluster-specific problems (failed env builds, old glibc/containers, storage quotas, GPU scheduling).
+- `gated-models.md`: gated models and software (ESM3, AlphaGenome, AlphaFold3, X3DNA), accepting licenses, and authenticating with HuggingFace.
 
 ## Runtime and behavior
 
