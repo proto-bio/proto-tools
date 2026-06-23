@@ -205,7 +205,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
     # Hold one checkpoint at a time and swap weights in-process when the requested replicate/species
     # changes (the four borzoi replicate models don't co-reside in GPU memory). This avoids
     # restarting the whole worker process per replicate — the churn that triggered the GPU-teardown
-    # wedge and dominated runtime for borzoi-ensemble (an internal issue).
+    # wedge and dominated runtime for borzoi-ensemble.
     if (
         _model is None
         or _model.species != species

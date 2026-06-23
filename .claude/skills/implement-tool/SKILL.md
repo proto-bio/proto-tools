@@ -195,7 +195,7 @@ def cloud_unsupported_reason(self) -> str | None:
     return None
 ```
 
-A tool whose *only* mode needs a local file (e.g. a required local DB/HMM input, like `blast-search` local mode or `pyhmmer-hmmscan`) returns the reason unconditionally. Scope this to **intrinsically** local configs — do **not** encode deployment-specific hosting knowledge here (e.g. which model checkpoints are warmed on the cloud runtime); that stays private to the tools backend. The router invokes this only on the `device='cloud'` path, after the `local_cpu` no-op and the license gate.
+A tool whose *only* mode needs a local file (e.g. a required local DB/HMM input, like `blast-search` local mode or `pyhmmer-hmmscan`) returns the reason unconditionally. Scope this to **intrinsically** local configs — do **not** encode deployment-specific hosting knowledge here (e.g. which model checkpoints are pre-warmed on the hosted service); that stays in the private hosting layer. The router invokes this only on the `device='cloud'` path, after the `local_cpu` no-op and the license gate.
 
 ## Mutual-exclusion fields (XOR groups)
 

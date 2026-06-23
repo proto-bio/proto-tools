@@ -214,7 +214,7 @@ between rapidly (e.g. `borzoi`'s four replicates, iterated per `borzoi-ensemble`
 call). Restarting the whole worker process on each switch — the default
 `reload_on_change` path — means a fresh process spawn, re-import, and model
 reload every time, which both dominated runtime and repeatedly exercised the
-GPU-teardown path that could wedge a worker (an internal issue).
+GPU-teardown path that could wedge a worker.
 
 Such a tool may instead swap the checkpoint **in-process**: leave the selecting
 field (`replicate`/`species`) *unmarked* (`reload_on_change` absent) and have the

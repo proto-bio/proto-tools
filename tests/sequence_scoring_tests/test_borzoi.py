@@ -178,7 +178,7 @@ def test_borzoi_config_does_not_restart_worker_per_replicate():
     """replicate/species must NOT be reload_on_change: the worker swaps checkpoints in-process.
 
     A full worker restart per replicate (4x per ensemble call) is the churn that triggered the
-    GPU-teardown wedge (an internal issue); inference.py now reloads weights in-process.
+    GPU-teardown wedge; inference.py now reloads weights in-process.
     """
     from proto_tools.tools.sequence_scoring.borzoi import BorzoiConfig
 

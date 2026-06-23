@@ -953,7 +953,7 @@ class PersistentWorker:
         uninterruptible kernel sleep (D-state) — typically a wedged GPU/CUDA driver
         call — and cannot be reaped from the parent; the OS reaps it once the syscall
         returns or the container exits. Propagating the reap ``TimeoutExpired`` would
-        mask the caller's real error and abort the run (an internal issue), so the
+        mask the caller's real error and abort the run, so the
         unreapable process is logged and abandoned instead.
         """
         if self._process is not None:
