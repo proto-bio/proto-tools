@@ -281,6 +281,27 @@ class Structure(BaseModel):
 
         structure_value = data.get("structure")
 
+        # A nested Structure instance under the ``structure`` key — i.e.
+        # ``Structure(structure=<Structure>)`` or ``Structure(**{"structure": <Structure>, ...})``.
+        # This happens when a serialized Structure dict round-trips, or when the API gateway
+        # substitutes a synthetic ``Structure`` for an uploaded asset reference nested inside the
+        # documented ``Structure.model_dump()`` envelope. Unwrap to the inner content and carry its
+        # metadata (outer-provided keys win) so construction is idempotent instead of calling the
+        # str-only helpers below on a ``Structure`` object.
+        if isinstance(structure_value, Structure):
+            inner = structure_value
+            data["structure"] = inner.structure
+            if not data.get("structure_format"):
+                data["structure_format"] = inner.structure_format
+            if not data.get("source"):
+                data["source"] = inner.source
+            current_bft = data.get("b_factor_type")
+            if current_bft in (None, BFactorType.UNSPECIFIED, "unspecified"):
+                data["b_factor_type"] = inner.b_factor_type
+            if data.get("metrics") is None:
+                data["metrics"] = inner.metrics
+            structure_value = data["structure"]
+
         # If structure is an http(s) URL, fetch its content transparently (mirrors the path branch).
         if looks_like_url(structure_value):
             data["structure"] = _fetch_structure_url(structure_value)
