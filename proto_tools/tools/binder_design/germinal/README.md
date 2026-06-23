@@ -16,7 +16,7 @@
 
 ## Overview
 
-Germinal is a complete pipeline for de novo, epitope-targeted antibody design (single-domain VHHs and scFvs), from [Mille-Fragoso et al., 2025](https://www.biorxiv.org/content/10.1101/2025.09.19.677421). This toolkit wraps it as one tool, `germinal-design`, that runs a full design campaign against one target per call: AF2-Multimer hallucination, AbMPNN sequence redesign, and structure validation with PyRosetta interface filtering.
+Germinal is a complete pipeline for de novo, epitope-targeted antibody design (single-domain VHHs and scFvs), from [Mille-Fragoso et al., 2026](https://www.nature.com/articles/s41587-026-03187-0). This toolkit wraps it as one tool, `germinal-design`, that runs a full design campaign against one target per call: AF2-Multimer hallucination, AbMPNN sequence redesign, and structure validation with PyRosetta interface filtering.
 
 ## Background
 
