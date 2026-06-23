@@ -89,6 +89,7 @@ class ESM2ScoringConfig(MaskedModelScoringConfig):
     )
 
     def cloud_unsupported_reason(self) -> str | None:
+        """The 15B variant is too large to host on Proto's cloud GPUs."""
         if self.model_checkpoint == "esm2_t48_15B_UR50D":
             return "The 15B variant (esm2_t48_15B_UR50D) isn't available with device='cloud'. Choose a smaller variant, or run locally."
         return None
