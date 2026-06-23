@@ -43,29 +43,7 @@ For shared filesystems, model weights can be reused to avoid downloading duplica
 
 ### Step 3: Gated model access (optional)
 
-Some tools use gated models that require accepting a license / terms-of-use. Two access flows depending on how the upstream author publishes weights:
-
-| Model | Source | Access |
-|-------|--------|--------|
-| ESM3 | HuggingFace: [EvolutionaryScale/esm3-sm-open-v1](https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1) | Accept EvolutionaryScale license, then authenticate with HF (see below) |
-| AlphaGenome | HuggingFace: [google/alphagenome-all-folds](https://huggingface.co/google/alphagenome-all-folds) | Accept Google DeepMind terms, then authenticate with HF (see below) |
-| AlphaFold3 | DeepMind request form: [google-deepmind/alphafold3#obtaining-model-parameters](https://github.com/google-deepmind/alphafold3#obtaining-model-parameters) | Submit DeepMind's form; if approved, you can download the weights archive and place at `$PROTO_HOME/proto_model_cache/alphafold3/` (or set `PROTO_ALPHAFOLD3_WEIGHTS_DIR`). See [`proto_tools/tools/structure_prediction/alphafold3/README.md`](proto_tools/tools/structure_prediction/alphafold3/README.md) for the full weights-setup flow. |
-
-> **X3DNA** (gated *software*, used by `x3dna-fiber`): register free at [x3dna.org](https://x3dna.org/), then see [`proto_tools/tools/structure_prediction/x3dna/SETUP.md`](proto_tools/tools/structure_prediction/x3dna/SETUP.md) to stage it into the cache (no environment variable needed).
-
-**For HuggingFace-gated models:**
-
-1. Create a [HuggingFace](https://huggingface.co) account
-2. Visit each model page above and **accept the license/terms**
-3. Install the [HuggingFace CLI](https://huggingface.co/docs/huggingface_hub/en/guides/cli) and log in:
-   ```bash
-   curl -LsSf https://hf.co/cli/install.sh | bash
-   hf auth login
-   ```
-   Or set the token directly in your environment:
-   ```bash
-   export HF_TOKEN=hf_...
-   ```
+A few tools use gated models or software that require accepting a license / terms-of-use first (e.g. ESM3, AlphaGenome, AlphaFold3, X3DNA). See [notes/gated-models.md](notes/gated-models.md) for the full list and per-model access steps.
 
 > [!TIP]
 > **You're all set up!** To learn what features are available in the library, check out the [guides](guides/) — four short notebooks covering tool environments, persistent execution, device management, and parallel multi-GPU runs.

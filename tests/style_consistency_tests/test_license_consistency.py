@@ -29,8 +29,8 @@ _TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "proto_tools" / "to
 # Canonical SPDX license texts live here, deduplicated across toolkits.
 _LICENSES_DIR = _TOOLS_DIR / "_licenses"
 
-# Repo-root README, home of the "Gated model access" table.
-_ROOT_README = _TOOLS_DIR.parent.parent / "README.md"
+# The "Gated model access" table lives in this note (linked from the root README).
+_GATED_MODELS_NOTE = _TOOLS_DIR.parent.parent / "notes" / "gated-models.md"
 
 # Directories under proto_tools/tools/ that aren't tool categories.
 _EXCLUDED_DIRS = frozenset({"__pycache__", "infra", "utils", "testing"})
@@ -321,13 +321,13 @@ def test_hf_gated_access_matches_require_hf_token() -> None:
 
 
 def _gated_readme_table_models() -> set[str]:
-    """First-column model names from the root README 'Gated model access' table."""
-    lines = _ROOT_README.read_text().splitlines()
+    """First-column names from the 'Gated model access' table in notes/gated-models.md."""
+    lines = _GATED_MODELS_NOTE.read_text().splitlines()
     header = next(
-        (i for i, ln in enumerate(lines) if re.match(r"\|\s*Model\s*\|\s*Source\s*\|\s*Access\s*\|", ln)),
+        (i for i, ln in enumerate(lines) if re.match(r"\|\s*Model/Tool\s*\|\s*Source\s*\|\s*Access\s*\|", ln)),
         None,
     )
-    assert header is not None, "root README is missing the '| Model | Source | Access |' gated-access table"
+    assert header is not None, "notes/gated-models.md is missing the '| Model/Tool | Source | Access |' table"
     models: set[str] = set()
     for ln in lines[header + 1 :]:
         if not ln.startswith("|"):
@@ -340,10 +340,12 @@ def _gated_readme_table_models() -> set[str]:
 
 
 def test_gated_readme_table_matches_access_field() -> None:
-    """The root README gated-access table must list exactly the access-restricted toolkits.
+    """The gated-access table must list every access-restricted toolkit.
 
     Expected model names are each restricted toolkit's README H1, so the
     hand-maintained table cannot drift from the structured weights.access set.
+    The table may also carry gated *software* rows (e.g. X3DNA) that have no
+    weights.access, so it is a superset of the access-restricted models.
     """
     restricted = {tid for tid, access in _toolkit_access_map().items() if access in ("hf-gated", "request")}
     expected: set[str] = set()
@@ -353,9 +355,8 @@ def test_gated_readme_table_matches_access_field() -> None:
         assert h1, f"{tid}/README.md has no H1 to match against the gated-access table"
         expected.add(h1.group(1).strip())
     table = _gated_readme_table_models()
-    assert table == expected, (
-        "Root README 'Gated model access' table is out of sync with weights.access. "
-        f"In table only: {sorted(table - expected)}; "
+    assert expected <= table, (
+        "notes/gated-models.md 'Gated model access' table is out of sync with weights.access. "
         f"access-restricted but missing from table: {sorted(expected - table)}."
     )
 
