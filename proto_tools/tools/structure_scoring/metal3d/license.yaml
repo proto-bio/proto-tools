@@ -1,0 +1,8 @@
+code:
+  spdx: MIT
+  url: https://github.com/gelnesr/dEVA/blob/main/LICENSE
+commercial_use: "yes"
+redistribution: true
+attribution_required: false
+notes: Metal3D/dEVA inference adapted from gelnesr/dEVA; model checkpoints are downloaded from the upstream repository during setup.
+last_updated: "2026-06-25"
