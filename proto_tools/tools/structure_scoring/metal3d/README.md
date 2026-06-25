@@ -3,7 +3,7 @@
 # Metal3D
 
 > [!NOTE]
-> **License:** Metal3D is open source and free for academic and commercial use under an MIT license. Please refer to [the license](https://github.com/gelnesr/dEVA/blob/main/LICENSE) for full terms.
+> **License:** Metal3D uses MIT for code and CC-BY-4.0 for model weights and may require explicit attribution when utilized. Please refer to the [code license](https://github.com/gelnesr/dEVA/blob/main/LICENSE) and [model weights license](https://github.com/lcbc-epfl/metal-site-prediction#license) for full terms.
 
 ## Overview
 

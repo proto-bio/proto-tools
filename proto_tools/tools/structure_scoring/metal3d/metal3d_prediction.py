@@ -68,17 +68,16 @@ class Metal3DPredictionConfig(BaseConfig):
     """Configuration for Metal3D metal-ion location prediction.
 
     Attributes:
-        model_checkpoint: Checkpoint variant to use. ``metal3d-cat`` is the
-            catalytic-metal dEVA checkpoint; ``metal3d-clean`` is the cleaned
-            Metal3D variant; ``metal3d-original`` is the original Metal3D zinc
-            checkpoint from the Nature Communications paper.
-        probability_threshold: Probability threshold used to decide whether a
+        model_checkpoint (Literal["metal3d-cat", "metal3d-clean", "metal3d-original"]): Checkpoint
+            variant to use. ``metal3d-cat`` is the catalytic-metal dEVA checkpoint;
+            ``metal3d-clean`` is the cleaned Metal3D variant; ``metal3d-original`` is the
+            original Metal3D zinc checkpoint from the Nature Communications paper.
+        probability_threshold (float): Probability threshold used to decide whether a
             predicted site should be annotated as a zinc atom.
-        cluster_distance_threshold: Agglomerative clustering distance threshold
+        cluster_distance_threshold (float): Agglomerative clustering distance threshold
             in Angstroms for merging high-probability grid points into sites.
-        max_sites: Maximum number of clustered sites to return per structure.
-        device: Runtime device.
-        verbose: Whether to emit verbose worker logs.
+        max_sites (int): Maximum number of clustered sites to return per structure.
+        device (str): Runtime device.
     """
 
     model_checkpoint: Literal["metal3d-cat", "metal3d-clean", "metal3d-original"] = ConfigField(
@@ -112,11 +111,6 @@ class Metal3DPredictionConfig(BaseConfig):
         title="Device",
         description="Device to run the model on.",
         include_in_key=False,
-    )
-    verbose: bool = ConfigField(
-        default=False,
-        title="Verbose",
-        description="Whether to emit verbose worker logs.",
     )
 
 
@@ -221,7 +215,11 @@ class Metal3DPredictionResult(Metrics):
 
 
 class Metal3DPredictionOutput(BaseToolOutput):
-    """Output from Metal3D metal-ion site prediction."""
+    """Output from Metal3D metal-ion site prediction.
+
+    Attributes:
+        results (list[Metal3DPredictionResult]): One Metal3D prediction result per input structure.
+    """
 
     results: list[Metal3DPredictionResult] = Field(
         default_factory=list,
@@ -318,7 +316,9 @@ def run_metal3d_prediction(
         worker_result = ToolInstance.dispatch("metal3d", payload, instance=instance, config=config)
 
         sites = [
-            Metal3DSite(x=float(site["x"]), y=float(site["y"]), z=float(site["z"]), probability=float(site["probability"]))
+            Metal3DSite(
+                x=float(site["x"]), y=float(site["y"]), z=float(site["z"]), probability=float(site["probability"])
+            )
             for site in worker_result.get("sites", [])
         ]
         residue_probs = [

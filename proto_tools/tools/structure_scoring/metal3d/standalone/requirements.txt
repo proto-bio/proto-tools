@@ -1,6 +1,4 @@
 numpy
-parmed
 moleculekit==1.14.8
 scipy
 scikit-learn
-tqdm

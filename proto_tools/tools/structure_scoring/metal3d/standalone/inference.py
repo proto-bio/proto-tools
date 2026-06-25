@@ -123,8 +123,7 @@ def _resolve_checkpoint_path(model_checkpoint: str) -> Path:
         if path.exists():
             return path
     raise FileNotFoundError(
-        f"metal3d: checkpoint {filename!r} not found in {search_dirs}; "
-        "run setup.sh or set PROTO_METAL3D_WEIGHTS_DIR"
+        f"metal3d: checkpoint {filename!r} not found in {search_dirs}; run setup.sh or set PROTO_METAL3D_WEIGHTS_DIR"
     )
 
 
@@ -138,9 +137,7 @@ def _extract_state_dict(checkpoint: Any) -> dict[str, torch.Tensor]:
     if not isinstance(checkpoint, dict):
         raise TypeError(f"metal3d: expected checkpoint dict, got {type(checkpoint).__name__}")
     return {
-        str(key).removeprefix("module."): value
-        for key, value in checkpoint.items()
-        if isinstance(value, torch.Tensor)
+        str(key).removeprefix("module."): value for key, value in checkpoint.items() if isinstance(value, torch.Tensor)
     }
 
 
@@ -194,17 +191,21 @@ def _predict(
             "annotated_pdb": annotated_pdb,
         }
 
-    voxels, prot_centers, _prot_n, _prots = _process_structures(str(pdb_path), ids)
+    record_by_id = dict(zip(ids, residue_records, strict=True))
+    voxels, prot_centers, _prot_n, _prots, voxelized_ids = _process_structures(str(pdb_path), ids)
 
     outputs = torch.zeros([voxels.size(0), 1, 32, 32, 32], device="cpu")
     with torch.no_grad():
         for i in range(voxels.size(0)):
             outputs[i : i + 1] = model(voxels[i : i + 1].to(device)).detach().cpu()
 
+    # Align each probability to its residue by the atom id that was actually voxelized: residues
+    # whose voxelization failed are dropped, so a positional zip against all candidates would mislabel.
     per_res_p, _ = torch.max(outputs.view(outputs.shape[0], -1), 1)
-    residue_probabilities = []
-    for record, probability in zip(residue_records, per_res_p.numpy().tolist(), strict=False):
-        residue_probabilities.append({**record, "probability": float(probability)})
+    residue_probabilities = [
+        {**record_by_id[atom_id], "probability": float(probability)}
+        for atom_id, probability in zip(voxelized_ids, per_res_p.numpy().tolist(), strict=True)
+    ]
 
     prot_v = np.vstack(prot_centers)
     output_v = outputs.flatten().numpy()
@@ -220,7 +221,9 @@ def _predict(
     raw_sites.sort(key=lambda site: site["probability"], reverse=True)
     sites = raw_sites[:max_sites]
     pmetal = float(sites[0]["probability"]) if sites else 0.0
-    annotated_pdb = _annotate_top_site(pdb_path.read_text(), sites[0] if sites and pmetal > probability_threshold else None)
+    annotated_pdb = _annotate_top_site(
+        pdb_path.read_text(), sites[0] if sites and pmetal > probability_threshold else None
+    )
 
     return {
         "pmetal": pmetal,
@@ -321,21 +324,27 @@ def _voxelize_single_notcentered(env: tuple[Molecule, int]) -> tuple[torch.Tenso
     return torch.from_numpy(prot_vox_t.copy()).float(), prot_centers, prot_n, prot.copy()
 
 
-def _process_structures(pdb_file: str, atom_ids: list[int]) -> tuple[torch.Tensor, tuple[np.ndarray, ...], tuple[Any, ...], tuple[Molecule, ...]]:
+def _process_structures(
+    pdb_file: str, atom_ids: list[int]
+) -> tuple[torch.Tensor, tuple[np.ndarray, ...], tuple[Any, ...], tuple[Molecule, ...], list[int]]:
     prot = Molecule(pdb_file)
     prot.filter("protein and not hydrogen")
     results = []
+    voxelized_ids: list[int] = []
     for atom_id in atom_ids:
         result = _voxelize_single_notcentered((prot.copy(), atom_id))
         if result is not None:
             results.append(result)
+            voxelized_ids.append(atom_id)
     if not results:
         raise RuntimeError("metal3d: voxelization failed for every candidate residue")
     vox_env, prot_centers_list, prot_n_list, envs = zip(*results, strict=True)
-    return torch.stack(vox_env, dim=0), prot_centers_list, prot_n_list, envs
+    return torch.stack(vox_env, dim=0), prot_centers_list, prot_n_list, envs, voxelized_ids
 
 
-def _create_grid_from_bb(bounding_box: list[list[float]], voxel_size: float = 1.0) -> tuple[np.ndarray, tuple[int, int, int]]:
+def _create_grid_from_bb(
+    bounding_box: list[list[float]], voxel_size: float = 1.0
+) -> tuple[np.ndarray, tuple[int, int, int]]:
     xrange = np.arange(bounding_box[0][0], bounding_box[1][0] + 0.5, step=voxel_size)
     yrange = np.arange(bounding_box[0][1], bounding_box[1][1] + 0.5, step=voxel_size)
     zrange = np.arange(bounding_box[0][2], bounding_box[1][2] + 0.5, step=voxel_size)
@@ -379,7 +388,14 @@ def _find_unique_sites(
         return []
     if len(points) == 1:
         position = points[0]
-        return [{"x": float(position[0]), "y": float(position[1]), "z": float(position[2]), "probability": float(point_p[0])}]
+        return [
+            {
+                "x": float(position[0]),
+                "y": float(position[1]),
+                "z": float(position[2]),
+                "probability": float(point_p[0]),
+            }
+        ]
 
     clustering = AgglomerativeClustering(n_clusters=None, linkage="complete", distance_threshold=threshold).fit(points)
     sites = []
