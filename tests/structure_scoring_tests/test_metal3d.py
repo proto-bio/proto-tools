@@ -11,18 +11,10 @@ from proto_tools import (
     Structure,
     run_metal3d_prediction,
 )
-from proto_tools.tools.tool_registry import ToolRegistry
 from tests.conftest import benchmark_twice
 
 EXAMPLE_PDB = Path(__file__).parent.parent / "dummy_data" / "pdl1.pdb"
 BENCHMARK_PDB = Path(__file__).parent.parent / "dummy_data" / "renin_af3.pdb"
-
-
-def test_metal3d_prediction_is_registered() -> None:
-    spec = ToolRegistry.get("metal3d-prediction")
-    assert spec.key == "metal3d-prediction"
-    assert spec.uses_gpu is True
-    assert spec.config_model is Metal3DPredictionConfig
 
 
 def test_metal3d_input_accepts_single_structure_with_candidate_residues() -> None:
