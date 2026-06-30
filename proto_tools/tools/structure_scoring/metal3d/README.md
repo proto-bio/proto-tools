@@ -7,13 +7,15 @@
 
 ## Overview
 
-Metal3D predicts metal-ion locations in protein structures from residue-centered 3D voxel features. This toolkit defaults to the original Metal3D checkpoint and additionally exposes dEVA's retrained Metal3D-Cat and Metal3D-Clean checkpoints through the Proto tool interface, returning clustered metal-site probabilities, optional per-candidate residue probabilities, and an annotated PDB containing the top predicted zinc site when it passes the configured threshold.
+Metal3D is a deep-learning model that predicts where zinc ions bind in a protein structure, developed by the Laboratory of Computational Chemistry and Biochemistry at EPFL. Given a structure, it scores candidate metal-binding sites and returns the predicted zinc coordinates together with a per-site confidence. This toolkit runs Metal3D over one or more input structures, returning clustered metal-site probabilities, optional per-residue probabilities, and an annotated PDB containing the top predicted zinc site when it clears the reporting threshold.
 
 ## Background
 
-Metal3D ([Dürr, Levy, and Rothlisberger, 2023](https://doi.org/10.1038/s41467-023-37870-6)) is a 3D convolutional neural network for locating likely zinc-binding sites in protein structures. It evaluates residue-centered voxel boxes around candidate metal-binding residues and converts the predicted grid probabilities into metal-site coordinates.
+Metal3D ([Dürr, Levy, and Rothlisberger, 2023](https://doi.org/10.1038/s41467-023-37870-6)) is a three-dimensional convolutional neural network for predicting zinc-ion locations in protein structures. Around each candidate metal-coordinating residue (such as histidine, cysteine, aspartate, and glutamate), it voxelizes the local atomic environment into a 16 Å cubic box at 0.5 Å resolution with eight physicochemical channels — among them hydrophobicity, aromaticity, metal-coordinating atoms, hydrogen-bond donors and acceptors, and charge. The network maps each voxelized environment to a per-voxel probability of zinc occupancy; these residue-centered densities are averaged onto a shared grid and clustered into discrete predicted sites, each with a confidence value. On experimental structures Metal3D recovers zinc positions to within 0.70 ± 0.64 Å of their crystallographic locations — the most accurate zinc-location predictor reported at the time of publication — and, because it reasons from local structure rather than sequence conservation, it remains accurate on proteins with few homologs in the Protein Data Bank.
 
-The `metal3d-original` checkpoint is the original Metal3D network; `metal3d-cat` (catalytic) and `metal3d-clean` (cleaned) are dEVA retrains that use a modified architecture (4³ convolution kernels versus the original's 3³) and a wider grid-probability averaging radius. All three checkpoints are downloaded from `gelnesr/dEVA` during standalone setup.
+Metal3D yields two complementary outputs used in protein engineering: a per-residue zinc density that feeds into design workflows, and a global zinc density suitable for annotating computationally predicted structures. The published model is trained solely on zinc sites from the Protein Data Bank, though the authors note that the same framework extends to other metals by retraining on the corresponding sites.
+
+This toolkit defaults to the published checkpoint (`metal3d-original`) and additionally bundles two retrained variants from dEVA ([El Nesr et al., 2026](https://www.biorxiv.org/content/10.1101/2026.04.23.720277)), a multi-objective protein-design framework that uses Metal3D to score catalytic-metal coordination: `metal3d-cat` and `metal3d-clean`. These variants adopt a slightly modified network (4³ convolution kernels in place of the original 3³) and a wider grid-averaging radius; all three checkpoints are downloaded from the [dEVA repository](https://github.com/gelnesr/dEVA) during standalone setup.
 
 ### Learning Resources
 
@@ -34,7 +36,7 @@ This tool is appropriate for scoring enzyme-design proposals by predicted metal-
 
 #### Usage Tips
 
-- **`metal3d-original` (default) is the original Metal3D zinc model.** Switch to `metal3d-cat` for catalytic metal sites or `metal3d-clean` for the cleaned variant; both are dEVA retrains on the modified architecture.
+- **`model_checkpoint` (default `metal3d-original`) selects the network.** `metal3d-original` is the published Metal3D zinc model. `metal3d-cat` and `metal3d-clean` are dEVA's retrained variants on a modified architecture; choose `metal3d-cat` when scoring catalytic metal sites.
 - **Pass `candidate_residues` when the pocket is known.** Candidate filtering reduces the scored residue set and returns per-residue probabilities for the configured pocket positions.
 - **Tune `probability_threshold` for reporting, not model inference.** The model always produces grid probabilities; the threshold controls which clustered sites are returned and whether the top zinc site is appended to the annotated PDB.
 - **Use persistent tool instances for repeated calls.** The worker keeps the selected checkpoint loaded when reused through `ToolInstance.persist_tool("metal3d")`.
