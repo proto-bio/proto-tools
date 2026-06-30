@@ -31,15 +31,13 @@ CHECKPOINT_FILES = {
     "metal3d-clean": "metal3d_clean.pth",
     "metal3d-original": "metal_0.5A_v3_d0.2_16Abox.pth",
 }
-# Conv kernel size per checkpoint: the original Metal3D weights use kernel 3;
-# dEVA's retrained cat/clean checkpoints use kernel 4.
+# Conv kernel size per checkpoint: 3 for original Metal3D, 4 for dEVA cat/clean.
 CHECKPOINT_KERNEL_SIZES = {
     "metal3d-cat": 4,
     "metal3d-clean": 4,
     "metal3d-original": 3,
 }
-# Grid-probability averaging cutoff (Angstroms) per checkpoint: original Metal3D
-# averages within 0.25 A; dEVA's cat/clean use 0.5 A.
+# Grid-averaging cutoff (A) per checkpoint: 0.25 for original Metal3D, 0.5 for dEVA cat/clean.
 CHECKPOINT_PROBABILITY_CUTOFFS = {
     "metal3d-cat": 0.5,
     "metal3d-clean": 0.5,
@@ -220,8 +218,7 @@ def _predict(
         for i in range(voxels.size(0)):
             outputs[i : i + 1] = model(voxels[i : i + 1].to(device)).detach().cpu()
 
-    # Align each probability to its residue by the atom id that was actually voxelized: residues
-    # whose voxelization failed are dropped, so a positional zip against all candidates would mislabel.
+    # Align probabilities to residues by the actually-voxelized atom id (failed residues are dropped).
     per_res_p, _ = torch.max(outputs.view(outputs.shape[0], -1), 1)
     residue_probabilities = [
         {**record_by_id[atom_id], "probability": float(probability)}

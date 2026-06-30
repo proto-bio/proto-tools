@@ -19,9 +19,7 @@ from tests.tool_infra_tests.test_export_functionality import validate_output
 EXAMPLE_PDB = Path(__file__).parent.parent / "dummy_data" / "pdl1.pdb"
 BENCHMARK_PDB = Path(__file__).parent.parent / "dummy_data" / "renin_af3.pdb"
 
-# Human carbonic anhydrase II (2VVB): a catalytic zinc enzyme, the canonical
-# Metal3D example (also the tool's example_input fixture). The zinc is
-# coordinated by the His94/His96/His119 triad.
+# Carbonic anhydrase (2VVB) catalytic zinc, coordinated by His94/His96/His119.
 ZINC_PDB = (
     Path(__file__).resolve().parents[2]
     / "proto_tools"
@@ -33,8 +31,7 @@ ZINC_PDB = (
 _ZINC_SITE = (-6.855, -1.627, 15.459)
 _ZINC_TRIAD = {"X": [94, 96, 119]}
 
-# Exposed checkpoint variants, exercised end-to-end below. Each loads its own
-# architecture (kernel 3 for the original weights, kernel 4 for dEVA cat/clean).
+# All checkpoints, each loading its own architecture (kernel 3 original, 4 dEVA).
 _CHECKPOINTS = ["metal3d-cat", "metal3d-clean", "metal3d-original"]
 
 _persistent_tool = make_persistent_fixture("metal3d")
