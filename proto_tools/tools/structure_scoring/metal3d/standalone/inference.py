@@ -31,22 +31,39 @@ CHECKPOINT_FILES = {
     "metal3d-clean": "metal3d_clean.pth",
     "metal3d-original": "metal_0.5A_v3_d0.2_16Abox.pth",
 }
+# Conv kernel size per checkpoint: 3 for original Metal3D, 4 for dEVA cat/clean.
+CHECKPOINT_KERNEL_SIZES = {
+    "metal3d-cat": 4,
+    "metal3d-clean": 4,
+    "metal3d-original": 3,
+}
+# Grid-averaging cutoff (A) per checkpoint: 0.25 for original Metal3D, 0.5 for dEVA cat/clean.
+CHECKPOINT_PROBABILITY_CUTOFFS = {
+    "metal3d-cat": 0.5,
+    "metal3d-clean": 0.5,
+    "metal3d-original": 0.25,
+}
 METAL_BINDING_RESNAMES = "HIS HID HIE HIP CYS CYX GLU GLH GLN ASP ASH ASN MET"
 
 
 class Model(nn.Module):  # type: ignore[misc, unused-ignore]
-    """Metal3D 3D-convolutional network."""
+    """Metal3D 3D-convolutional network.
 
-    def __init__(self) -> None:
-        """Initialize the Metal3D convolutional layers."""
+    ``kernel_size`` selects the architecture variant: 3 for the original Metal3D
+    weights, 4 for dEVA's retrained cat/clean checkpoints. conv5 always uses a
+    large filter to aggregate features over the whole box.
+    """
+
+    def __init__(self, kernel_size: int) -> None:
+        """Initialize the Metal3D convolutional layers for the given kernel size."""
         super().__init__()
-        self.conv1 = nn.Conv3d(8, 32, 4, padding="same")
-        self.conv2 = nn.Conv3d(32, 64, 4, padding="same")
-        self.conv3 = nn.Conv3d(64, 80, 4, padding="same")
-        self.conv4 = nn.Conv3d(80, 20, 4, padding="same")
+        self.conv1 = nn.Conv3d(8, 32, kernel_size, padding="same")
+        self.conv2 = nn.Conv3d(32, 64, kernel_size, padding="same")
+        self.conv3 = nn.Conv3d(64, 80, kernel_size, padding="same")
+        self.conv4 = nn.Conv3d(80, 20, kernel_size, padding="same")
         self.conv5 = nn.Conv3d(20, 20, 20, padding="same")
-        self.conv6 = nn.Conv3d(20, 16, 4, padding="same")
-        self.conv7 = nn.Conv3d(16, 1, 4, padding="same")
+        self.conv6 = nn.Conv3d(20, 16, kernel_size, padding="same")
+        self.conv7 = nn.Conv3d(16, 1, kernel_size, padding="same")
         self.dropout1 = nn.Dropout(0.2)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -78,7 +95,7 @@ class Metal3DModel:
         checkpoint_path = _resolve_checkpoint_path(model_checkpoint)
         if verbose:
             logger.info("Loading Metal3D checkpoint %s from %s", model_checkpoint, checkpoint_path)
-        model = Model().to(device).eval()
+        model = Model(kernel_size=CHECKPOINT_KERNEL_SIZES[model_checkpoint]).to(device).eval()
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         state_dict = _extract_state_dict(checkpoint)
         model.load_state_dict(state_dict)
@@ -148,7 +165,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"metal3d: unknown operation {operation!r}; valid: ['predict']")
 
     device = input_dict.get("device", "cuda")
-    model_checkpoint = input_dict.get("model_checkpoint", "metal3d-cat")
+    model_checkpoint = input_dict.get("model_checkpoint", "metal3d-original")
     if model_checkpoint not in CHECKPOINT_FILES:
         raise ValueError(f"metal3d: unknown checkpoint {model_checkpoint!r}")
     verbose = bool(input_dict.get("verbose", False))
@@ -165,6 +182,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             candidate_residues=input_dict.get("candidate_residues"),
             probability_threshold=float(input_dict.get("probability_threshold", 0.2)),
             cluster_distance_threshold=float(input_dict.get("cluster_distance_threshold", 7.0)),
+            probability_cutoff=CHECKPOINT_PROBABILITY_CUTOFFS[model_checkpoint],
             max_sites=int(input_dict.get("max_sites", 8)),
             device=device,
         )
@@ -177,6 +195,7 @@ def _predict(
     candidate_residues: dict[str, list[int]] | None,
     probability_threshold: float,
     cluster_distance_threshold: float,
+    probability_cutoff: float,
     max_sites: int,
     device: str,
 ) -> dict[str, Any]:
@@ -199,8 +218,7 @@ def _predict(
         for i in range(voxels.size(0)):
             outputs[i : i + 1] = model(voxels[i : i + 1].to(device)).detach().cpu()
 
-    # Align each probability to its residue by the atom id that was actually voxelized: residues
-    # whose voxelization failed are dropped, so a positional zip against all candidates would mislabel.
+    # Align probabilities to residues by the actually-voxelized atom id (failed residues are dropped).
     per_res_p, _ = torch.max(outputs.view(outputs.shape[0], -1), 1)
     residue_probabilities = [
         {**record_by_id[atom_id], "probability": float(probability)}
@@ -211,7 +229,7 @@ def _predict(
     output_v = outputs.flatten().numpy()
     bb = _get_bb(prot_v)
     grid, _ = _create_grid_from_bb(bb)
-    probability_values = _get_probability_mean(grid, prot_v, output_v)
+    probability_values = _get_probability_mean(grid, prot_v, output_v, cutoff=probability_cutoff)
     raw_sites = _find_unique_sites(
         probability_values,
         grid,
@@ -365,11 +383,11 @@ def _get_bb(points: np.ndarray) -> list[list[float]]:
     ]
 
 
-def _get_probability_mean(grid: np.ndarray, prot_centers: np.ndarray, pvalues: np.ndarray) -> np.ndarray:
+def _get_probability_mean(grid: np.ndarray, prot_centers: np.ndarray, pvalues: np.ndarray, cutoff: float) -> np.ndarray:
     tree = KDTree(prot_centers)
     probabilities = []
     for point in grid:
-        nearest_neighbors, indices = tree.query(point, k=20, distance_upper_bound=0.5, workers=1)
+        nearest_neighbors, indices = tree.query(point, k=20, distance_upper_bound=cutoff, workers=1)
         finite = nearest_neighbors != np.inf
         probabilities.append(float(np.mean(pvalues[indices[finite]])) if np.any(finite) else 0.0)
     probabilities_array: np.ndarray = np.asarray(probabilities, dtype=np.float64)
