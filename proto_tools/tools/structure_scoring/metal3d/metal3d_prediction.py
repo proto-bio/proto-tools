@@ -262,7 +262,7 @@ def example_input() -> Any:
         inputs=[
             Metal3DStructureInput(
                 structure=Structure(structure=str(Path(__file__).parent / "example_input_fixture.pdb")),
-                candidate_residues={"X": [94, 96, 119]},
+                candidate_residues=ResidueSelection(chains={"X": [94, 96, 119]}),
             )
         ]
     )
