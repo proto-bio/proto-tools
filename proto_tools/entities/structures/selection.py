@@ -291,7 +291,7 @@ class StructureInputBase(BaseModel):
 
     structure: Structure = Field(
         title="Input Structure",
-        description="Structure (Path | PDB string | Structure | dict).",
+        description="Structure (Path | PDB/CIF string | Structure | dict).",
     )
 
     @model_validator(mode="before")
