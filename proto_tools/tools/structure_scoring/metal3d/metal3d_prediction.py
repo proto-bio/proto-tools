@@ -253,13 +253,16 @@ class Metal3DPredictionOutput(BaseToolOutput):
 
 
 def example_input() -> Any:
-    """Minimal valid input for schema examples and warmup."""
+    """Minimal valid input for schema examples and warmup.
+
+    Human carbonic anhydrase II (2VVB), a catalytic zinc enzyme, scored at its
+    His94/His96/His119 zinc-coordinating triad.
+    """
     return Metal3DPredictionInput(
         inputs=[
             Metal3DStructureInput(
-                structure=Structure(
-                    structure=str(Path(__file__).parent.parent / "structure_metrics" / "example_input_fixture.pdb")
-                ),
+                structure=Structure(structure=str(Path(__file__).parent / "example_input_fixture.pdb")),
+                candidate_residues={"X": [94, 96, 119]},
             )
         ]
     )

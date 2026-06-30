@@ -38,6 +38,13 @@ CHECKPOINT_KERNEL_SIZES = {
     "metal3d-clean": 4,
     "metal3d-original": 3,
 }
+# Grid-probability averaging cutoff (Angstroms) per checkpoint: original Metal3D
+# averages within 0.25 A; dEVA's cat/clean use 0.5 A.
+CHECKPOINT_PROBABILITY_CUTOFFS = {
+    "metal3d-cat": 0.5,
+    "metal3d-clean": 0.5,
+    "metal3d-original": 0.25,
+}
 METAL_BINDING_RESNAMES = "HIS HID HIE HIP CYS CYX GLU GLH GLN ASP ASH ASN MET"
 
 
@@ -177,6 +184,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             candidate_residues=input_dict.get("candidate_residues"),
             probability_threshold=float(input_dict.get("probability_threshold", 0.2)),
             cluster_distance_threshold=float(input_dict.get("cluster_distance_threshold", 7.0)),
+            probability_cutoff=CHECKPOINT_PROBABILITY_CUTOFFS[model_checkpoint],
             max_sites=int(input_dict.get("max_sites", 8)),
             device=device,
         )
@@ -189,6 +197,7 @@ def _predict(
     candidate_residues: dict[str, list[int]] | None,
     probability_threshold: float,
     cluster_distance_threshold: float,
+    probability_cutoff: float,
     max_sites: int,
     device: str,
 ) -> dict[str, Any]:
@@ -223,7 +232,7 @@ def _predict(
     output_v = outputs.flatten().numpy()
     bb = _get_bb(prot_v)
     grid, _ = _create_grid_from_bb(bb)
-    probability_values = _get_probability_mean(grid, prot_v, output_v)
+    probability_values = _get_probability_mean(grid, prot_v, output_v, cutoff=probability_cutoff)
     raw_sites = _find_unique_sites(
         probability_values,
         grid,
@@ -377,11 +386,11 @@ def _get_bb(points: np.ndarray) -> list[list[float]]:
     ]
 
 
-def _get_probability_mean(grid: np.ndarray, prot_centers: np.ndarray, pvalues: np.ndarray) -> np.ndarray:
+def _get_probability_mean(grid: np.ndarray, prot_centers: np.ndarray, pvalues: np.ndarray, cutoff: float) -> np.ndarray:
     tree = KDTree(prot_centers)
     probabilities = []
     for point in grid:
-        nearest_neighbors, indices = tree.query(point, k=20, distance_upper_bound=0.5, workers=1)
+        nearest_neighbors, indices = tree.query(point, k=20, distance_upper_bound=cutoff, workers=1)
         finite = nearest_neighbors != np.inf
         probabilities.append(float(np.mean(pvalues[indices[finite]])) if np.any(finite) else 0.0)
     probabilities_array: np.ndarray = np.asarray(probabilities, dtype=np.float64)
