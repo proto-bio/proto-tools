@@ -17,13 +17,6 @@ Metal3D yields two complementary outputs used in protein engineering: a per-resi
 
 This toolkit defaults to the published checkpoint (`metal3d-original`) and additionally bundles two retrained variants from dEVA ([El Nesr et al., 2026](https://www.biorxiv.org/content/10.1101/2026.04.23.720277)), a multi-objective protein-design framework that uses Metal3D to score catalytic-metal coordination: `metal3d-cat` and `metal3d-clean`. These variants adopt a slightly modified network architecture and a wider grid-averaging radius; all three checkpoints are downloaded from the [dEVA repository](https://github.com/gelnesr/dEVA) during standalone setup.
 
-### Learning Resources
-
-- [Metal3D paper](https://doi.org/10.1038/s41467-023-37870-6). Nature Communications article describing the original Metal3D model.
-- [Metal3D repository](https://github.com/lcbc-epfl/metal-site-prediction). Original Metal3D code and the `metal3d-original` checkpoint.
-- [dEVA paper](https://www.biorxiv.org/content/10.1101/2026.04.23.720277). El Nesr et al., describing the dEVA framework behind the `metal3d-cat` and `metal3d-clean` checkpoints.
-- [dEVA repository](https://github.com/gelnesr/dEVA). Source of the inference code and the checkpoint files used by this wrapper.
-
 ## Tools
 
 ### Metal3D Prediction (`metal3d-prediction`)
