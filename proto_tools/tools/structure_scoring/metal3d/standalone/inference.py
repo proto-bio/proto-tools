@@ -127,6 +127,7 @@ _model = Metal3DModel()
 
 
 def _resolve_checkpoint_path(model_checkpoint: str) -> Path:
+    """Locate the weight file for ``model_checkpoint`` across the resolved weights directories, or raise ``FileNotFoundError``."""
     filename = CHECKPOINT_FILES[model_checkpoint]
     search_dirs: list[Path] = []
     resolved = resolve_weights_dir("metal3d")
@@ -145,6 +146,11 @@ def _resolve_checkpoint_path(model_checkpoint: str) -> Path:
 
 
 def _extract_state_dict(checkpoint: Any) -> dict[str, torch.Tensor]:
+    """Unwrap a saved checkpoint to a plain tensor state dict.
+
+    Handles checkpoints nested under ``state_dict``/``model_state_dict``/``model`` and
+    strips any ``module.`` prefixes left by ``DataParallel``.
+    """
     if isinstance(checkpoint, dict):
         for key in ("state_dict", "model_state_dict", "model"):
             value = checkpoint.get(key)
@@ -199,6 +205,12 @@ def _predict(
     max_sites: int,
     device: str,
 ) -> dict[str, Any]:
+    """Run Metal3D over a structure and return sites, per-residue probabilities, and an annotated PDB.
+
+    Voxelizes each candidate residue environment, runs the model, averages per-voxel
+    probabilities onto a grid, clusters high-probability points into sites, and appends the
+    top site as a zinc atom when it clears ``probability_threshold``.
+    """
     ids, residue_records = _candidate_ca_indices(pdb_path, candidate_residues)
     if len(ids) == 0:
         annotated_pdb = pdb_path.read_text()
@@ -256,6 +268,11 @@ def _candidate_ca_indices(
     pdb_path: Path,
     candidate_residues: dict[str, list[int]] | None,
 ) -> tuple[list[int], list[dict[str, Any]]]:
+    """Return CA atom indices to score, with a chain/residue record for each.
+
+    Uses ``candidate_residues`` when provided, otherwise every canonical metal-binding
+    residue type in the structure.
+    """
     mol = Molecule(str(pdb_path))
     mol.filter("protein and not hydrogen")
     if candidate_residues:
@@ -304,6 +321,12 @@ def _int_or_none(value: Any) -> int | None:
 
 
 def _voxelize_single_notcentered(env: tuple[Molecule, int]) -> tuple[torch.Tensor, np.ndarray, Any, Molecule] | None:
+    """Voxelize the atomic environment around one residue's CA into the 8-channel Metal3D grid.
+
+    Builds the eight physicochemical channels (hydrophobic, aromatic, metal-coordinating,
+    H-bond acceptor/donor, positive, negative, occupancy) and returns the voxel tensor with
+    its grid centers, or ``None`` if voxelization fails.
+    """
     prot, atom_id = env
     center = prot.get("coords", sel=f"index {atom_id} and name CA")
     size = [16, 16, 16]
@@ -345,6 +368,11 @@ def _voxelize_single_notcentered(env: tuple[Molecule, int]) -> tuple[torch.Tenso
 def _process_structures(
     pdb_file: str, atom_ids: list[int]
 ) -> tuple[torch.Tensor, tuple[np.ndarray, ...], tuple[Any, ...], tuple[Molecule, ...], list[int]]:
+    """Voxelize every candidate residue and stack the results.
+
+    Returns the batched voxel tensor, per-residue grid centers/dims/molecules, and the subset
+    of ``atom_ids`` that voxelized successfully (failures are dropped).
+    """
     prot = Molecule(pdb_file)
     prot.filter("protein and not hydrogen")
     results = []
@@ -363,6 +391,10 @@ def _process_structures(
 def _create_grid_from_bb(
     bounding_box: list[list[float]], voxel_size: float = 1.0
 ) -> tuple[np.ndarray, tuple[int, int, int]]:
+    """Build a regular point grid spanning ``bounding_box`` at ``voxel_size`` spacing.
+
+    Returns the flattened ``(N, 3)`` grid points and the per-axis dimensions.
+    """
     xrange = np.arange(bounding_box[0][0], bounding_box[1][0] + 0.5, step=voxel_size)
     yrange = np.arange(bounding_box[0][1], bounding_box[1][1] + 0.5, step=voxel_size)
     zrange = np.arange(bounding_box[0][2], bounding_box[1][2] + 0.5, step=voxel_size)
@@ -384,6 +416,11 @@ def _get_bb(points: np.ndarray) -> list[list[float]]:
 
 
 def _get_probability_mean(grid: np.ndarray, prot_centers: np.ndarray, pvalues: np.ndarray, cutoff: float) -> np.ndarray:
+    """Average per-voxel probabilities onto each grid point from nearby voxel centers.
+
+    For each grid point, averages ``pvalues`` over voxel centers within ``cutoff`` Angstroms
+    (up to 20 neighbors); points with no neighbor in range get 0.
+    """
     tree = KDTree(prot_centers)
     probabilities = []
     for point in grid:
@@ -401,6 +438,12 @@ def _find_unique_sites(
     threshold: float,
     probability_threshold: float,
 ) -> list[dict[str, float]]:
+    """Cluster grid points above ``probability_threshold`` into distinct metal sites.
+
+    Groups high-probability points with complete-linkage agglomerative clustering (merge
+    distance ``threshold``) and returns each cluster's probability-weighted center and peak
+    probability.
+    """
     points = grid[pvalues > probability_threshold]
     point_p = pvalues[pvalues > probability_threshold]
     if len(points) == 0:
@@ -434,6 +477,7 @@ def _find_unique_sites(
 
 
 def _annotate_top_site(pdb_content: str, site: dict[str, float] | None) -> str:
+    """Append ``site`` as a zinc HETATM to the PDB text, or return it unchanged when ``site`` is None."""
     if site is None:
         return pdb_content
     lines = [line for line in pdb_content.rstrip().splitlines() if not line.startswith("END")]
