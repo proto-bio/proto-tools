@@ -68,13 +68,16 @@ class OpenDDEMetrics(Metrics):
     """Per-structure metrics emitted by OpenDDE prediction.
 
     Metrics documented in ``metric_spec``:
-        avg_plddt (float): Average predicted LDDT score (0-100). Always present.
-        avg_pae (float): Mean of the per-token PAE matrix in Å. Always present.
-        pae (list[list[float]]): Full per-token PAE matrix in Å. Present when include_pae_matrix=True.
+        avg_plddt (float): Mean predicted LDDT score (0-100). Always present.
         ptm (float): Predicted TM-score (0-1). Always present.
-        iptm (float): Interface predicted TM-score (0-1). Depends on complex composition.
-        gpde (float): Global predicted distance error (Å). Always present.
+        iptm (float): Interface predicted TM-score (0-1); 0.0 for single-chain inputs.
+        gpde (float): Global predicted distance error (lower is better). Always present.
         ranking_score (float): OpenDDE ranking score used to select the best sample. Always present.
+        has_clash (bool): Whether the predicted structure has a steric clash. Always present.
+
+    Note:
+        OpenDDE does not emit a per-token PAE matrix, so no ``avg_pae``/``pae`` is
+        reported; ``gpde`` is its global confidence-of-placement metric.
     """
 
     metric_spec: ClassVar[dict[str, MetricSpec]] = {
@@ -85,17 +88,9 @@ class OpenDDEMetrics(Metrics):
             "max": 100.0,
             "better_values_are": "higher",
         },
-        "avg_pae": {"availability": "always", "type": "float", "min": 0.0, "max": None, "better_values_are": "lower"},
-        "pae": {
-            "availability": "when include_pae_matrix=True",
-            "type": "list[list[float]]",
-            "min": 0.0,
-            "max": None,
-            "better_values_are": "lower",
-        },
         "ptm": {"availability": "always", "type": "float", "min": 0.0, "max": 1.0, "better_values_are": "higher"},
         "iptm": {
-            "availability": "depends on complex composition",
+            "availability": "always",
             "type": "float",
             "min": 0.0,
             "max": 1.0,
@@ -108,6 +103,13 @@ class OpenDDEMetrics(Metrics):
             "min": None,
             "max": None,
             "better_values_are": "higher",
+        },
+        "has_clash": {
+            "availability": "always",
+            "type": "bool",
+            "min": None,
+            "max": None,
+            "better_values_are": "lower",
         },
     }
     primary_metric: str | None = "avg_plddt"
@@ -158,7 +160,8 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
             Inherited. Default: True.
         msa_search_config (Mmseqs2HomologySearchConfig | None): MMseqs2 search config;
             only used when ``use_msa=True``. Inherited. Default: None.
-        include_pae_matrix (bool): Attach the full per-token PAE matrix. Inherited. Default: False.
+        include_pae_matrix (bool): Inherited; ignored by OpenDDE, which emits no
+            per-token PAE matrix. Default: False.
         device (str): Device to run on (``"cuda"``, ``"cpu"``). Inherited. Default: ``"cuda"``.
         timeout (int | None): Max execution time in seconds; ``None`` waits indefinitely. Default: 1200.
     """
@@ -399,7 +402,6 @@ def _run_opendde_on_complex(
             "seed": seed,
             "device": config.device,
             "verbose": config.verbose,
-            "include_pae_matrix": config.include_pae_matrix,
         }
 
         output_data = ToolInstance.dispatch("opendde", input_data, instance=instance, config=config)
@@ -409,15 +411,12 @@ def _run_opendde_on_complex(
 
     metrics_dict: dict[str, Any] = {
         "avg_plddt": float(formatted_metrics["avg_plddt"]),
-        "avg_pae": float(formatted_metrics["avg_pae"]),
         "ptm": float(formatted_metrics["ptm"]),
+        "iptm": float(formatted_metrics["iptm"]),
         "gpde": float(formatted_metrics["gpde"]),
         "ranking_score": float(formatted_metrics["ranking_score"]),
+        "has_clash": bool(formatted_metrics["has_clash"]),
     }
-    if formatted_metrics.get("iptm") is not None:
-        metrics_dict["iptm"] = float(formatted_metrics["iptm"])
-    if config.include_pae_matrix and formatted_metrics.get("pae") is not None:
-        metrics_dict["pae"] = formatted_metrics["pae"]
 
     structure = Structure(
         structure=cif_output,

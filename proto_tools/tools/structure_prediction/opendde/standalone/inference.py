@@ -46,32 +46,28 @@ def _resolve_opendde_bin() -> str:
     )
 
 
-def _extract_structure_and_scores(
-    output_dir: str,
-    include_pae_matrix: bool,
-) -> dict[str, Any]:
+def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     """Select the best-ranked sample and extract its structure + confidence metrics.
 
-    OpenDDE writes one ``*_summary_confidence_sample_*.json`` per diffusion sample
-    under ``<output_dir>/<job_name>/seed_<seed>/predictions/``. The best sample is
-    the one with the highest ``ranking_score``; its ``.cif`` and full-data JSON
-    (per-token ``plddt``/``pae`` matrices) supply the returned metrics.
+    OpenDDE writes, per diffusion sample under
+    ``<output_dir>/<job_name>/seed_<seed>/predictions/``, a
+    ``<job_name>_sample_<rank>.cif`` and a matching
+    ``<job_name>_summary_confidence_sample_<rank>.json``. The summary already
+    carries scalar confidence values (``plddt`` is the mean pLDDT on a 0-100
+    scale, plus ``ptm``/``iptm``/``gpde``/``ranking_score``); OpenDDE does not emit
+    a per-token PAE matrix by default, so no ``avg_pae`` is reported. The best
+    sample is the one with the highest ``ranking_score``.
 
     Args:
         output_dir (str): Directory OpenDDE wrote predictions into.
-        include_pae_matrix (bool): Attach the full per-token PAE matrix under ``pae``.
 
     Returns:
         dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
 
     Raises:
-        FileNotFoundError: If no summary/CIF/full-data outputs are found.
+        FileNotFoundError: If no summary/CIF outputs are found.
     """
-    import numpy as np
-
-    summary_paths = glob.glob(
-        os.path.join(output_dir, "**", "*_summary_confidence_sample_*.json"), recursive=True
-    )
+    summary_paths = glob.glob(os.path.join(output_dir, "**", "*_summary_confidence_sample_*.json"), recursive=True)
     if not summary_paths:
         raise FileNotFoundError(
             f"opendde: no '*_summary_confidence_sample_*.json' outputs found under {output_dir}; "
@@ -99,51 +95,28 @@ def _extract_structure_and_scores(
             f"opendde: found {len(summary_paths)} summary file(s) under {output_dir} but none had a 'ranking_score'"
         )
 
-    # Derive the sibling CIF / full-data paths from the winning summary filename:
-    #   <job_name>_summary_confidence_sample_<rank>.json
-    #   <job_name>_sample_<rank>.cif
-    #   <job_name>_full_data_sample_<rank>.json
+    # Derive the sibling CIF path from the winning summary filename:
+    #   <job_name>_summary_confidence_sample_<rank>.json  ->  <job_name>_sample_<rank>.cif
     pred_dir = os.path.dirname(best_path)
     basename = os.path.basename(best_path)
     match = re.search(r"^(?P<prefix>.+)_summary_confidence_sample_(?P<rank>.+)\.json$", basename)
     if match is None:
         raise FileNotFoundError(f"opendde: could not parse sample rank from summary filename {basename!r}")
-    prefix = match.group("prefix")
-    rank = match.group("rank")
-
-    cif_path = os.path.join(pred_dir, f"{prefix}_sample_{rank}.cif")
-    full_data_path = os.path.join(pred_dir, f"{prefix}_full_data_sample_{rank}.json")
+    cif_path = os.path.join(pred_dir, f"{match.group('prefix')}_sample_{match.group('rank')}.cif")
     if not os.path.exists(cif_path):
         raise FileNotFoundError(f"opendde: structure CIF not found for best sample: {cif_path}")
-    if not os.path.exists(full_data_path):
-        raise FileNotFoundError(f"opendde: full-data JSON not found for best sample: {full_data_path}")
 
-    with open(full_data_path) as f:
-        full_data = json.load(f)
-
-    # avg_plddt: mean of the per-atom/per-token plddt array (0-100). Fall back to the
-    # summary's scalar plddt when the full-data value is already a mean.
-    full_plddt = full_data.get("plddt")
-    if full_plddt is not None:
-        avg_plddt = float(np.mean(np.asarray(full_plddt, dtype=float)))
-    else:
-        avg_plddt = float(best_summary["plddt"])
-
-    # avg_pae: mean of the full-data PAE matrix (Å).
-    pae_array = np.asarray(full_data["pae"], dtype=float)
-    avg_pae = float(np.mean(pae_array))
-
-    iptm = best_summary.get("iptm")  # absent for monomers → None
+    # OpenDDE's summary reports mean pLDDT (0-100), ptm, iptm (0.0 for monomers),
+    # gpde (global predicted distance error), and ranking_score. No per-token PAE.
+    # OpenDDE always reports iptm (0.0 for single-chain inputs).
     metrics: dict[str, Any] = {
-        "avg_plddt": avg_plddt,
-        "avg_pae": avg_pae,
+        "avg_plddt": float(best_summary["plddt"]),
         "ptm": float(best_summary["ptm"]),
-        "iptm": float(iptm) if iptm is not None else None,
+        "iptm": float(best_summary["iptm"]),
         "gpde": float(best_summary["gpde"]),
         "ranking_score": float(best_summary["ranking_score"]),
+        "has_clash": bool(best_summary.get("has_clash", False)),
     }
-    if include_pae_matrix:
-        metrics["pae"] = pae_array.tolist()
 
     with open(cif_path) as f:
         cif_output = f.read()
@@ -218,6 +191,8 @@ class OpenDDEModel:
         # get_subprocess_device_env), so map any cuda[:N] request to plain "cuda".
         device_arg = "cpu" if device == "cpu" else "cuda"
 
+        # OpenDDE's -n/--model_name flag only accepts "opendde_v1"; the ABAG model is
+        # selected via --load_checkpoint_path (handled below), not via -n.
         cmd = [
             _resolve_opendde_bin(),
             "pred",
@@ -226,7 +201,7 @@ class OpenDDEModel:
             "-o",
             output_dir,
             "-n",
-            model_name,
+            "opendde_v1",
             "--sample",
             str(num_samples),
             "--step",
@@ -273,7 +248,6 @@ class OpenDDEModel:
         seed: int,
         device: str,
         verbose: bool = False,
-        include_pae_matrix: bool = False,
     ) -> dict[str, Any]:
         """Run OpenDDE prediction and return the best sample's structure + metrics.
 
@@ -292,7 +266,6 @@ class OpenDDEModel:
             seed (int): Random seed (``--seeds``).
             device (str): Device string (e.g. ``"cuda"``, ``"cpu"``).
             verbose (bool): Tee subprocess stdout/stderr to this process.
-            include_pae_matrix (bool): Attach the full per-token PAE matrix.
 
         Returns:
             dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
@@ -342,7 +315,7 @@ class OpenDDEModel:
             raise OpenDDEExecutionError(f"opendde: prediction failed (exit {returncode}): {stderr_tail}")
 
         logger.debug("OpenDDE execution completed successfully.")
-        return _extract_structure_and_scores(output_dir, include_pae_matrix=include_pae_matrix)
+        return _extract_structure_and_scores(output_dir)
 
 
 # ============================================================================
@@ -385,7 +358,6 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             seed=input_dict["seed"],
             device=input_dict["device"],
             verbose=input_dict["verbose"],
-            include_pae_matrix=input_dict["include_pae_matrix"],
         )
     raise ValueError(f"opendde: unknown operation {operation!r}; valid: ['predict']")
 

@@ -51,13 +51,17 @@ def test_opendde_json_top_level_and_protein_entry():
 
 
 def test_opendde_ligand_uses_ccd_code_when_available():
-    """A Fragment with a resolved ccd_code serializes to ``ligand: <ccd>`` (CCD preferred)."""
+    """A Fragment with a resolved ccd_code serializes to CCD_-prefixed ``ligand`` (CCD preferred).
+
+    OpenDDE parses a ligand string as SMILES unless it carries the ``CCD_`` prefix,
+    so bare CCD codes must be prefixed.
+    """
     atp = Fragment(ccd_code="ATP")
     assert atp.ccd_code == "ATP"  # invariant guard
 
     job = complex_to_opendde_json([Chain(sequence="MKTLPGCDA", entity_type="protein"), atp], "j", [0])
     ligand_entries = [e["ligand"] for e in job["sequences"] if "ligand" in e]
-    assert ligand_entries == [{"ligand": "ATP", "count": 1, "id": ["B"]}]
+    assert ligand_entries == [{"ligand": "CCD_ATP", "count": 1, "id": ["B"]}]
 
 
 def test_opendde_ligand_falls_back_to_smiles_when_no_ccd_match():
@@ -138,15 +142,15 @@ def _fake_dispatch_factory(captured, *, metrics):
 
 
 def test_opendde_run_builds_structure_with_metrics(monkeypatch):
-    """run_opendde threads config through dispatch and assembles OpenDDEMetrics (iptm=None dropped)."""
+    """run_opendde threads config through dispatch and assembles OpenDDEMetrics (monomer iptm=0.0)."""
     captured: dict = {}
     metrics = {
         "avg_plddt": 91.2,
-        "avg_pae": 3.4,
         "ptm": 0.85,
-        "iptm": None,
+        "iptm": 0.0,
         "gpde": 1.2,
         "ranking_score": 0.77,
+        "has_clash": False,
     }
     monkeypatch.setattr(
         "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
@@ -175,12 +179,12 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
 
     m = structure.metrics
     assert m["avg_plddt"] == pytest.approx(91.2)
-    assert m["avg_pae"] == pytest.approx(3.4)
     assert m["ptm"] == pytest.approx(0.85)
     assert m["gpde"] == pytest.approx(1.2)
     assert m["ranking_score"] == pytest.approx(0.77)
-    # iptm was None in the worker payload → not surfaced.
-    assert "iptm" not in m.model_dump(exclude_none=True)
+    assert m["has_clash"] is False
+    # OpenDDE always reports iptm (0.0 for a single-chain input).
+    assert m["iptm"] == pytest.approx(0.0)
     assert_metrics_in_spec(result)
 
     # Dispatch was routed to the OpenDDE toolkit with the predict operation and the
@@ -199,11 +203,11 @@ def test_opendde_iptm_surfaced_when_present(monkeypatch):
     captured: dict = {}
     metrics = {
         "avg_plddt": 80.0,
-        "avg_pae": 5.0,
         "ptm": 0.7,
         "iptm": 0.62,
         "gpde": 2.0,
         "ranking_score": 0.5,
+        "has_clash": False,
     }
     monkeypatch.setattr(
         "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
@@ -220,11 +224,11 @@ def test_opendde_one_structure_per_complex(monkeypatch):
     captured: dict = {}
     metrics = {
         "avg_plddt": 88.0,
-        "avg_pae": 4.0,
         "ptm": 0.8,
-        "iptm": None,
+        "iptm": 0.0,
         "gpde": 1.5,
         "ranking_score": 0.6,
+        "has_clash": False,
     }
     monkeypatch.setattr(
         "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",

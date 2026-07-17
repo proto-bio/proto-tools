@@ -111,8 +111,13 @@ def complex_to_opendde_json(
         chain_id = chain_ids[idx]
 
         if isinstance(chain, Fragment):
-            ligand_ref = chain.ccd_code or chain.smiles
-            if not ligand_ref:
+            # OpenDDE reads a CCD code only when it is ``CCD_``-prefixed; any other
+            # string is parsed as SMILES. Prefer the CCD code, fall back to raw SMILES.
+            if chain.ccd_code:
+                ligand_ref = _ccd_code(chain.ccd_code)
+            elif chain.smiles:
+                ligand_ref = chain.smiles
+            else:
                 raise ValueError(
                     f"Ligand chain {chain_id!r} has neither a CCD code nor a SMILES string; "
                     "OpenDDE requires one of them to place a ligand."
