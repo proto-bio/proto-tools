@@ -115,7 +115,7 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
         "iptm": float(best_summary["iptm"]),
         "gpde": float(best_summary["gpde"]),
         "ranking_score": float(best_summary["ranking_score"]),
-        "has_clash": bool(best_summary.get("has_clash", False)),
+        "has_clash": bool(best_summary["has_clash"]),
     }
 
     with open(cif_path) as f:
