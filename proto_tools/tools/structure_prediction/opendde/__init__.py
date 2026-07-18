@@ -9,9 +9,9 @@ from proto_tools.tools.structure_prediction.opendde.opendde import (
 )
 
 __all__ = [
-    "OpenDDEConfig",
     "OpenDDEInput",
-    "OpenDDEMetrics",
+    "OpenDDEConfig",
     "OpenDDEOutput",
+    "OpenDDEMetrics",
     "run_opendde",
 ]

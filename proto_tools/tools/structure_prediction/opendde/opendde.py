@@ -89,13 +89,7 @@ class OpenDDEMetrics(Metrics):
             "better_values_are": "higher",
         },
         "ptm": {"availability": "always", "type": "float", "min": 0.0, "max": 1.0, "better_values_are": "higher"},
-        "iptm": {
-            "availability": "always",
-            "type": "float",
-            "min": 0.0,
-            "max": 1.0,
-            "better_values_are": "higher",
-        },
+        "iptm": {"availability": "always", "type": "float", "min": 0.0, "max": 1.0, "better_values_are": "higher"},
         "gpde": {"availability": "always", "type": "float", "min": 0.0, "max": None, "better_values_are": "lower"},
         "ranking_score": {
             "availability": "always",
@@ -307,8 +301,13 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
 
     Returns:
         OpenDDEOutput: Output with one ``Structure`` per input complex, each
-            carrying :class:`OpenDDEMetrics` (avg_plddt, avg_pae, ptm, iptm, gpde,
-            ranking_score) on ``.metrics``.
+            carrying :class:`OpenDDEMetrics` (avg_plddt, ptm, iptm, gpde,
+            ranking_score, has_clash) on ``.metrics``.
+
+    See Also:
+        - OpenDDE GitHub: https://github.com/aurekaresearch/OpenDDE
+        - OpenDDE paper: https://arxiv.org/abs/2607.03787
+        - OpenDDE weights: https://huggingface.co/aurekaresearch/OpenDDE
 
     Example:
         >>> inputs = OpenDDEInput(complexes=[["MVLSPADKTNVKAAW", "GSSGSSGSS"]])
@@ -319,7 +318,7 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
     base_seed = config.seed if config.seed is not None else config.get_random_int()
     with _config_overrides_env(config.root_dir):
         results = [
-            _run_opendde_on_complex(
+            run_opendde_on_complex(
                 config=config,
                 sp_complex=comp,
                 complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
@@ -343,7 +342,7 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
     )
 
 
-def _run_opendde_on_complex(
+def run_opendde_on_complex(
     config: OpenDDEConfig,
     sp_complex: Complex,
     complex_msas: ComplexMSAs | None,
