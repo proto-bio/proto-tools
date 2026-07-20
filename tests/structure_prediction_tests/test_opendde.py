@@ -24,8 +24,6 @@ from tests.tool_infra_tests.test_export_functionality import validate_export_out
 _CRO_SEQUENCE = "MQTQNNSREKQAAALERLFLSCFLKDPVPKPLQEGTCDDVLCRELLNESETHLVQSIFRKESKVPGA"
 # A short, foldable peptide for GPU smoke tests.
 _TINY_PEPTIDE = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
-# L-tyrosine SMILES; resolves to CCD "TYR".
-_TYR_SMILES = "c1cc(ccc1C[C@@H](C(=O)O)N)O"
 
 
 # ── OpenDDE JSON shape: entity mapping ───────────────────────────────────────
@@ -126,12 +124,7 @@ def test_opendde_cloud_unsupported_reason():
 
 
 def _fake_dispatch_factory(captured, *, metrics):
-    """Build a ToolInstance.dispatch stand-in that records its call and returns a fake result.
-
-    The mock runs synchronously inside ``run_opendde``'s per-complex tempdir, so the
-    caller can inspect the toolkit / input_data captured on each dispatch. It returns a
-    real (small) mmCIF via ``synthetic_cif`` so ``normalize_output_chain_ids`` can parse it.
-    """
+    """Build a ToolInstance.dispatch stand-in that records each call into ``captured``."""
 
     def fake_dispatch(toolkit, input_data, **kwargs):
         captured.setdefault("toolkits", []).append(toolkit)
@@ -168,7 +161,6 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
         ),
     )
 
-    # Output cardinality + tool bookkeeping.
     assert result.success
     assert result.tool_id == "opendde-prediction"
     assert len(result.structures) == 1
@@ -187,8 +179,7 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
     assert m["iptm"] == pytest.approx(0.0)
     assert_metrics_in_spec(result)
 
-    # Dispatch was routed to the OpenDDE toolkit with the predict operation and the
-    # config's sampling params threaded through the input payload.
+    # Config sampling params must reach the worker payload, not just the config object.
     assert captured["toolkits"] == ["opendde"]
     [input_data] = captured["input_data"]
     assert input_data["operation"] == "predict"

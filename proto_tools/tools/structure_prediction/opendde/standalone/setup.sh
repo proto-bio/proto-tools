@@ -33,7 +33,7 @@ proto_install_pytorch "torch==2.7.1"
 echo "Installing dependencies from requirements.txt..."
 uv pip install -r requirements.txt
 
-# ── Weights + runtime assets ────────────────────────────────────────────────
+# ─── Weights + runtime assets ───────────────────────────────────────────────
 # OpenDDE reads checkpoints and common assets from OPENDDE_ROOT_DIR. Resolve the
 # managed weights directory and treat it as OPENDDE_ROOT_DIR (inference.py resolves
 # the same path at runtime via resolve_weights_dir("opendde")).

@@ -1,4 +1,4 @@
-"""OpenDDE all-atom structure prediction — worker protocol standalone runner."""
+"""OpenDDE inference implementation."""
 
 import glob
 import json
@@ -74,7 +74,7 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
             "the prediction produced no samples"
         )
 
-    # Pick the sample with the highest ranking_score.
+    # Pick the best sample by ranking score across ALL seeds, not just the first.
     best_path: str | None = None
     best_summary: dict[str, Any] = {}
     best_score = float("-inf")
@@ -106,9 +106,8 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     if not os.path.exists(cif_path):
         raise FileNotFoundError(f"opendde: structure CIF not found for best sample: {cif_path}")
 
-    # OpenDDE's summary reports mean pLDDT (0-100), ptm, iptm (0.0 for monomers),
-    # gpde (global predicted distance error), and ranking_score. No per-token PAE.
-    # OpenDDE always reports iptm (0.0 for single-chain inputs).
+    # Every key is hard-indexed: OpenDDE writes all six unconditionally, so a
+    # missing one is a schema change we want to fail on, not silently default.
     metrics: dict[str, Any] = {
         "avg_plddt": float(best_summary["plddt"]),
         "ptm": float(best_summary["ptm"]),

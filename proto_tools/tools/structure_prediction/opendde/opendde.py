@@ -45,8 +45,8 @@ logger = getLogger(__name__)
 class OpenDDEInput(StructurePredictionInput):
     """Input object for OpenDDE structure prediction.
 
-    Defines the input for predicting all-atom 3D structures of proteins, nucleic
-    acids, and ligands (and their complexes) with OpenDDE, a co-folding model.
+    This class defines the input parameters for predicting 3D structures of proteins,
+    DNA, RNA, and ligands using OpenDDE, an all-atom co-folding model.
 
     Inherits from ``StructurePredictionInput``.
 
@@ -54,12 +54,19 @@ class OpenDDEInput(StructurePredictionInput):
         complexes (list[Complex]): List of complexes to predict structures for.
             Inherited from ``StructurePredictionInput``. Each complex can contain
             one or more chains of proteins, DNA, RNA, or ligands.
+
         msas (list[ComplexMSAs] | None): Pre-computed MSAs, one entry per complex.
             Each entry is a ``ComplexMSAs`` (per-chain MSAs keyed by chain index).
             Populated by ``preprocess()`` or supplied directly. Default: None.
+
+    Note:
+        OpenDDE supports entity types: ``"protein"``, ``"dna"``, ``"rna"``, and
+        ``"ligand"``. Entity types are automatically inferred if not explicitly
+        provided. Chain modifications are supported; their CCD codes are emitted
+        with the ``CCD_`` prefix OpenDDE's input schema requires.
     """
 
-    # OpenDDE supports the standard biomolecular entity types.
+    # OpenDDE supports all standard entity types except glycan
     SUPPORTED_ENTITY_TYPES: ClassVar[set[str]] = {"protein", "dna", "rna", "ligand"}
     ALLOWS_CHAIN_MODIFICATIONS = True
 
@@ -74,10 +81,6 @@ class OpenDDEMetrics(Metrics):
         gpde (float): Global predicted distance error (lower is better). Always present.
         ranking_score (float): OpenDDE ranking score used to select the best sample. Always present.
         has_clash (bool): Whether the predicted structure has a steric clash. Always present.
-
-    Note:
-        OpenDDE does not emit a per-token PAE matrix, so no ``avg_pae``/``pae`` is
-        reported; ``gpde`` is its global confidence-of-placement metric.
     """
 
     metric_spec: ClassVar[dict[str, MetricSpec]] = {
@@ -123,40 +126,55 @@ class OpenDDEOutput(StructurePredictionOutput):
 class OpenDDEConfig(MSAStructurePredictionConfig):
     """Configuration object for OpenDDE structure prediction.
 
-    Configures OpenDDE, an all-atom co-folding model for proteins, nucleic acids,
-    and ligands. Fields map to the ``opendde pred`` CLI (``--sample``, ``--step``,
-    ``--cycle``, ``--use_template``, ``--use_rna_msa``, ``-n``).
+    This class defines configuration parameters for running OpenDDE, an all-atom
+    co-folding model supporting proteins, DNA, RNA, and ligands. Fields map to the
+    ``opendde pred`` CLI (``--sample``, ``--step``, ``--cycle``, ``--use_template``,
+    ``--use_rna_msa``, ``-n``).
 
     Inherits from ``MSAStructurePredictionConfig``.
 
     Attributes:
         name (str): Name of the folding job; drives the output path. Default: ``"opendde_job"``.
+
         model_name (Literal["opendde_v1", "opendde_abag"]): OpenDDE checkpoint to use
             (``-n``). ``opendde_abag`` is antibody-antigen tuned. Default: ``"opendde_v1"``.
+
         num_samples (int): Independent diffusion samples per complex (``--sample``);
             the best by ranking score is returned. Default: 1.
+
         num_steps (int): Diffusion denoising steps (``--step``). Higher = more
             refined but slower. Default: 200.
+
         num_cycles (int): Recycling iterations (``--cycle``). Higher = more accurate
             but slower. Default: 10.
+
         use_template (bool): Enable OpenDDE's template pipeline (``--use_template``).
             Default: False.
+
         use_rna_msa (bool): Enable OpenDDE's RNA MSA pipeline (``--use_rna_msa``).
             Default: False.
+
         root_dir (str | None): OpenDDE runtime/asset root (``OPENDDE_ROOT_DIR``:
             checkpoints and common assets). If ``None``, resolves from
             ``PROTO_OPENDDE_WEIGHTS_DIR`` / ``PROTO_MODEL_CACHE``. Default: None.
+
         load_checkpoint_path (str | None): Explicit checkpoint file override
             (``--load_checkpoint_path``); bypasses ``model_name`` resolution. Default: None.
+
         use_msa (bool): Auto-generate protein MSAs via MMseqs2 homology search;
             supplied MSAs always override this. Inherited. Default: True.
+
         pair_heterocomplex_msas (bool): Taxonomy-pair heterocomplex protein MSAs.
             Inherited. Default: True.
+
         msa_search_config (Mmseqs2HomologySearchConfig | None): MMseqs2 search config;
             only used when ``use_msa=True``. Inherited. Default: None.
+
         include_pae_matrix (bool): Inherited; ignored by OpenDDE, which emits no
             per-token PAE matrix. Default: False.
+
         device (str): Device to run on (``"cuda"``, ``"cpu"``). Inherited. Default: ``"cuda"``.
+
         timeout (int | None): Max execution time in seconds; ``None`` waits indefinitely. Default: 1200.
     """
 
@@ -317,13 +335,13 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
     """
     base_seed = config.seed if config.seed is not None else config.get_random_int()
     with _config_overrides_env(config.root_dir):
+        # Advance the seed per complex so duplicate inputs get distinct seeds.
         results = [
             run_opendde_on_complex(
                 config=config,
                 sp_complex=comp,
                 complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
                 instance=instance,
-                # Advance the seed per complex so duplicate inputs get distinct seeds.
                 seed=base_seed + dispatch_idx,
                 dispatch_idx=dispatch_idx,
             )

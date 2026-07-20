@@ -63,9 +63,9 @@ SP_TOOL_MAP = {
     "alphafold3": {"config": AlphaFold3Config, "input": AlphaFold3Input, "run_func": run_alphafold3},
     "boltz2": {"config": Boltz2Config, "input": Boltz2Input, "run_func": run_boltz2},
     "chai1": {"config": Chai1Config, "input": Chai1Input, "run_func": run_chai1},
+    "opendde": {"config": OpenDDEConfig, "input": OpenDDEInput, "run_func": run_opendde},
     "protenix": {"config": ProtenixConfig, "input": ProtenixInput, "run_func": run_protenix},
     "rf3": {"config": RF3Config, "input": RF3Input, "run_func": run_rf3_prediction},
-    "opendde": {"config": OpenDDEConfig, "input": OpenDDEInput, "run_func": run_opendde},
 }
 
 

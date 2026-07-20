@@ -125,7 +125,9 @@ def complex_to_opendde_json(
             sequences.append({"ligand": {"ligand": ligand_ref, "count": 1, "id": [chain_id]}})
             continue
 
-        entity_key = {"protein": "proteinChain", "dna": "dnaSequence", "rna": "rnaSequence"}.get(chain.entity_type or "")
+        entity_key = {"protein": "proteinChain", "dna": "dnaSequence", "rna": "rnaSequence"}.get(
+            chain.entity_type or ""
+        )
         if entity_key is None:
             raise ValueError(f"OpenDDE does not support entity type {chain.entity_type!r} for chain {chain_id!r}.")
         entry: dict[str, Any] = {"sequence": chain.sequence, "count": 1, "id": [chain_id]}
