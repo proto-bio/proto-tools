@@ -3,6 +3,12 @@
 Tests for OpenDDE all-atom structure prediction (``opendde-prediction``).
 """
 
+import importlib.util
+import logging
+import sys
+import types
+from pathlib import Path
+
 import pytest
 
 from proto_tools.entities.ligands import Fragment
@@ -108,6 +114,103 @@ def test_opendde_dna_modifications_prefixed_base():
 
     mods = job["sequences"][0]["dnaSequence"]["modifications"]
     assert mods == [{"modificationType": "CCD_5CM", "basePosition": 2}]
+
+
+# ── Checkpoint selection (standalone argv) ───────────────────────────────────
+
+
+def _load_standalone_inference():
+    """Import the standalone ``inference.py`` with a stubbed ``standalone_helpers``."""
+    _sh = sys.modules.setdefault("standalone_helpers", types.SimpleNamespace())
+    if not hasattr(_sh, "get_logger"):
+        _sh.get_logger = logging.getLogger
+    standalone_dir = (
+        Path(__file__).resolve().parents[2]
+        / "proto_tools"
+        / "tools"
+        / "structure_prediction"
+        / "opendde"
+        / "standalone"
+    )
+    spec = importlib.util.spec_from_file_location("_opendde_si_for_tests", standalone_dir / "inference.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # The console script only exists inside the tool venv; argv assembly is what is under test.
+    module._resolve_opendde_bin = lambda: "/venv/bin/opendde"
+    return module
+
+
+def _build_cmd(model, **overrides):
+    """Call ``OpenDDEModel._build_cmd`` with defaults for the args under test."""
+    kwargs = {
+        "input_json_path": "input.json",
+        "output_dir": "output",
+        "job_name": "job",
+        "model_name": "opendde_v1",
+        "load_checkpoint_path": None,
+        "num_samples": 1,
+        "num_steps": 200,
+        "num_cycles": 10,
+        "use_msa": False,
+        "use_template": False,
+        "use_rna_msa": False,
+        "seed": 0,
+        "device": "cuda",
+    }
+    kwargs.update(overrides)
+    return model._build_cmd(**kwargs)
+
+
+def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
+    """Upstream's ``-n`` accepts only ``opendde_v1``; ``opendde_abag`` routes via checkpoint path."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+    ckpt_dir = tmp_path / "checkpoint"
+    ckpt_dir.mkdir()
+    (ckpt_dir / "opendde_abag.pt").write_bytes(b"")
+
+    cmd = _build_cmd(model, model_name="opendde_abag")
+
+    assert cmd[cmd.index("-n") + 1] == "opendde_v1"
+    assert "opendde_abag" not in cmd[cmd.index("-n") + 1]
+    assert cmd[cmd.index("--load_checkpoint_path") + 1] == str(ckpt_dir / "opendde_abag.pt")
+
+
+def test_opendde_default_model_sends_no_checkpoint_override(tmp_path):
+    """``opendde_v1`` lets OpenDDE load its own default weights."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+
+    assert "--load_checkpoint_path" not in _build_cmd(model, model_name="opendde_v1")
+
+
+def test_opendde_missing_abag_checkpoint_fails_before_dispatch(tmp_path):
+    """A derived abag path that does not exist must fail here, not inside the CLI subprocess."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+    (tmp_path / "checkpoint").mkdir()
+
+    with pytest.raises(FileNotFoundError, match="antibody-antigen checkpoint not found"):
+        _build_cmd(model, model_name="opendde_abag")
+
+
+def test_opendde_explicit_checkpoint_path_wins_over_model_name(tmp_path):
+    """An explicit ``load_checkpoint_path`` is passed through untouched and skips derivation."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+
+    cmd = _build_cmd(model, model_name="opendde_abag", load_checkpoint_path="/custom/ckpt.pt")
+
+    assert cmd[cmd.index("--load_checkpoint_path") + 1] == "/custom/ckpt.pt"
 
 
 # ── Config: cloud support gate ───────────────────────────────────────────────

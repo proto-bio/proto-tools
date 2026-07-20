@@ -8,7 +8,6 @@ import shutil
 import sys
 from typing import Any
 
-# Import from auto-copied standalone_helpers (heavy deps like numpy stay inside functions).
 from standalone_helpers import get_logger
 
 logger = get_logger(__name__)
@@ -74,7 +73,7 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
             "the prediction produced no samples"
         )
 
-    # Pick the best sample by ranking score across ALL seeds, not just the first.
+    # Pick the best sample by ranking score across all seeds
     best_path: str | None = None
     best_summary: dict[str, Any] = {}
     best_score = float("-inf")
@@ -106,8 +105,6 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     if not os.path.exists(cif_path):
         raise FileNotFoundError(f"opendde: structure CIF not found for best sample: {cif_path}")
 
-    # Every key is hard-indexed: OpenDDE writes all six unconditionally, so a
-    # missing one is a schema change we want to fail on, not silently default.
     metrics: dict[str, Any] = {
         "avg_plddt": float(best_summary["plddt"]),
         "ptm": float(best_summary["ptm"]),
@@ -186,12 +183,8 @@ class OpenDDEModel:
         """Build the ``opendde pred`` argv."""
         assert self.root_dir is not None  # set by load()
 
-        # OpenDDE only ever sees one physical GPU (CUDA_VISIBLE_DEVICES is pinned by
-        # get_subprocess_device_env), so map any cuda[:N] request to plain "cuda".
         device_arg = "cpu" if device == "cpu" else "cuda"
 
-        # OpenDDE's -n/--model_name flag only accepts "opendde_v1"; the ABAG model is
-        # selected via --load_checkpoint_path (handled below), not via -n.
         cmd = [
             _resolve_opendde_bin(),
             "pred",
@@ -226,6 +219,11 @@ class OpenDDEModel:
         resolved_ckpt = load_checkpoint_path
         if resolved_ckpt is None and model_name == "opendde_abag":
             resolved_ckpt = os.path.join(self.root_dir, "checkpoint", "opendde_abag.pt")
+            if not os.path.exists(resolved_ckpt):
+                raise FileNotFoundError(
+                    f"opendde: antibody-antigen checkpoint not found at {resolved_ckpt}; re-run setup.sh to "
+                    "download weights, or set load_checkpoint_path to an explicit checkpoint file"
+                )
         if resolved_ckpt:
             cmd += ["--load_checkpoint_path", resolved_ckpt]
 
