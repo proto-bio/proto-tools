@@ -20,6 +20,7 @@ from proto_tools.utils import (
     ToolInstance,
     return_invalid_nucleotide_chars,
 )
+from proto_tools.utils.device import RemoteDevice
 from proto_tools.utils.tool_io import Metrics, MetricSpec
 
 DEFAULT_MALINOIS_ARTIFACT_PATH = ""
@@ -292,10 +293,10 @@ class MalinoisScoreConfig(BaseConfig):
             raise ValueError("cell_types must be unique")
         return self
 
-    def remote_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """Local artifact/metadata overrides aren't present on a hosted worker."""
         if self.artifact_path or self.malinois_dir:
-            return "artifact_path/malinois_dir point to local files not available on device='proto'. Leave them empty (the managed cache is used), or run locally with device='cpu'."
+            return f"artifact_path/malinois_dir point to local files not available on device='{device}'. Leave them empty (the managed cache is used), or run locally with device='cpu'."
         return None
 
 
@@ -475,10 +476,10 @@ class MalinoisGradientConfig(BaseConfig):
             raise ValueError("loss_terms cannot be empty")
         return self
 
-    def remote_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """Local artifact/metadata overrides aren't present on a hosted worker."""
         if self.artifact_path or self.malinois_dir:
-            return "artifact_path/malinois_dir point to local files not available on device='proto'. Leave them empty (the managed cache is used), or run locally with device='cpu'."
+            return f"artifact_path/malinois_dir point to local files not available on device='{device}'. Leave them empty (the managed cache is used), or run locally with device='cpu'."
         return None
 
 

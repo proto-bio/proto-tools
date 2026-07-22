@@ -18,6 +18,7 @@ from proto_tools.utils import (
     ConfigField,
     ToolInstance,
 )
+from proto_tools.utils.device import RemoteDevice
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +196,10 @@ class Evo2SampleConfig(CausalModelSampleConfig):
         description="Include per-position logits in the output (large; disable to save memory)",
     )
 
-    def remote_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """A local weights directory (``local_path``) isn't present on a hosted worker."""
         if self.local_path:
-            return "local_path points to a local weights directory not available on device='proto'. Unset it, or run locally with device='cpu'."
+            return f"local_path points to a local weights directory not available on device='{device}'. Unset it, or run locally with device='cpu'."
         return None
 
 
