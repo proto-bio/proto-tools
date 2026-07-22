@@ -17,6 +17,7 @@ from proto_tools.utils import (
     ConfigField,
     ToolInstance,
 )
+from proto_tools.utils.device import RemoteDevice
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class ProGen2ScoringConfig(CausalModelScoringConfig):
         reload_on_change=True,
     )
 
-    def remote_unsupported_reason(self, device: str) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """A local weights directory (``local_path``) isn't present on a hosted worker."""
         if self.local_path:
             return f"local_path points to a local weights directory not available on device='{device}'. Unset it, or run locally with device='cpu'."

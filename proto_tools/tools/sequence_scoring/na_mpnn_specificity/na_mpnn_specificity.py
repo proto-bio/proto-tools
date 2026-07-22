@@ -17,6 +17,7 @@ from proto_tools.utils import (
     InputField,
     ToolInstance,
 )
+from proto_tools.utils.device import RemoteDevice
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ class NAMPNNSpecificityConfig(BaseConfig):
         description="Keep intermediate raw NA-MPNN output directories",
     )
 
-    def remote_unsupported_reason(self, device: str) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """NA-MPNN needs a local repo checkout + checkpoint that can't be staged to cloud."""
         return (
             "NA-MPNN requires a local repository checkout and checkpoint on disk, which "

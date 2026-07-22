@@ -31,6 +31,7 @@ from proto_tools.utils import (
     ToolInstance,
     return_invalid_protein_chars,
 )
+from proto_tools.utils.device import RemoteDevice
 from proto_tools.utils.tool_io import Metrics
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class BioEmuConfig(StructurePredictionConfig):
         self.msa_search_config.verbose = self.verbose
         return _preprocess_structure_prediction_msas(inputs, self.msa_search_config, self.verbose)
 
-    def remote_unsupported_reason(self, device: str) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """A custom local denoiser YAML (``denoiser_config``) isn't present on a hosted worker."""
         if self.denoiser_config:
             return f"denoiser_config is a local YAML file not available on device='{device}'. Unset it, or run locally with device='cpu'."

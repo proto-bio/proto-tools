@@ -16,6 +16,7 @@ from proto_tools.tools.masked_models.shared_data_models import (
 )
 from proto_tools.tools.tool_registry import tool
 from proto_tools.utils import ConfigField, ToolInstance
+from proto_tools.utils.device import RemoteDevice
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class ESM2ScoringConfig(MaskedModelScoringConfig):
         reload_on_change=True,
     )
 
-    def remote_unsupported_reason(self, device: str) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """The 15B variant is too large for Proto to host; other remotes are unaffected."""
         if device == "proto" and self.model_checkpoint == "esm2_t48_15B_UR50D":
             return (

@@ -16,6 +16,7 @@ from proto_tools.utils import (
     ToolInstance,
     one_hot_protein_logits,
 )
+from proto_tools.utils.device import RemoteDevice
 from proto_tools.utils.tool_io import InputField
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class ESM2GradientConfig(BaseConfig):
         include_in_key=False,
     )
 
-    def remote_unsupported_reason(self, device: str) -> str | None:
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:
         """The 15B variant is too large for Proto to host; other remotes are unaffected."""
         if device == "proto" and self.model_checkpoint == "esm2_t48_15B_UR50D":
             return (

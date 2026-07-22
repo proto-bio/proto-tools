@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
 
+from proto_tools.utils.device import RemoteDevice
 from proto_tools.utils.tool_io import (
     BaseToolInput,
     _extra_dict,
@@ -298,7 +299,7 @@ class BaseConfig(BaseModel):
         """Transform inputs before tool execution. Override in subclasses."""
         return inputs
 
-    def remote_unsupported_reason(self, device: str) -> str | None:  # noqa: ARG002 — overrides use it
+    def remote_unsupported_reason(self, device: RemoteDevice) -> str | None:  # noqa: ARG002 — overrides use it
         """Reason this config can't run on ``device``, or ``None`` if it can.
 
         Override in a tool's config to fail fast at dispatch when a setting needs a local
@@ -311,7 +312,7 @@ class BaseConfig(BaseModel):
         owns and pays for — those must branch on ``device``.
 
         Args:
-            device (str): Remote device being targeted, e.g. ``"proto"`` or ``"modal"``.
+            device (RemoteDevice): Remote target, ``"proto"`` or ``"modal"``.
 
         Returns:
             str | None: User-facing reason, or ``None`` when the config is compatible.

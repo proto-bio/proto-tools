@@ -1017,3 +1017,24 @@ def test_no_config_defines_the_legacy_hook_signature():
         if "device" not in inspect.signature(hook).parameters:
             stale.append(spec.key)
     assert not stale, f"configs still using the no-arg hook: {stale}"
+
+
+def test_remote_device_literal_matches_the_runtime_set():
+    """The type and the runtime membership test must not drift apart."""
+    from typing import get_args
+
+    from proto_tools.utils.device import _REMOTE_DEVICES, RemoteDevice
+
+    assert set(get_args(RemoteDevice)) == set(_REMOTE_DEVICES)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda", "cuda:0", "cuda:0,1", "cudax4", "cuda:1,cuda:2"])
+def test_local_devices_are_unaffected_by_the_remote_literal(device):
+    """Typing the hook parameter must not constrain the config's own device field."""
+    from proto_tools.utils.base_config import BaseConfig
+
+    # Local device strings still construct, and never reach the remote hook.
+    assert BaseConfig(device=device).device == device
+    from proto_tools.utils.device import is_remote_device
+
+    assert not is_remote_device(device)

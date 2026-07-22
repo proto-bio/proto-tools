@@ -13,7 +13,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +295,13 @@ def _validate_cuda_index(idx_str: str, device: str) -> int:
 # locally. "proto" is Proto's hosted service; "modal" is the caller's own
 # Modal deployment. What each can run differs, so availability is decided per
 # device rather than shared.
-_REMOTE_DEVICES: frozenset[str] = frozenset({"proto", "modal"})
+#
+# This is only the remote set. Local device strings ("cpu", "cuda", "cuda:0",
+# "cudax4", ...) are unconstrained and validated by parse_device_string.
+RemoteDevice = Literal["proto", "modal"]
+
+# Derived, so the type and the runtime set cannot drift apart.
+_REMOTE_DEVICES: frozenset[str] = frozenset(get_args(RemoteDevice))
 
 
 def is_remote_device(device: str) -> bool:
