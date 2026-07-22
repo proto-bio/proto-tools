@@ -269,10 +269,10 @@ class BioEmuConfig(StructurePredictionConfig):
         self.msa_search_config.verbose = self.verbose
         return _preprocess_structure_prediction_msas(inputs, self.msa_search_config, self.verbose)
 
-    def remote_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self, device: str) -> str | None:
         """A custom local denoiser YAML (``denoiser_config``) isn't present on a hosted worker."""
         if self.denoiser_config:
-            return "denoiser_config is a local YAML file not available on device='proto'. Unset it, or run locally with device='cpu'."
+            return f"denoiser_config is a local YAML file not available on device='{device}'. Unset it, or run locally with device='cpu'."
         return None
 
 

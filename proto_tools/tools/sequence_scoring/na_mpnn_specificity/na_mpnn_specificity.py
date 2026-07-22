@@ -207,11 +207,11 @@ class NAMPNNSpecificityConfig(BaseConfig):
         description="Keep intermediate raw NA-MPNN output directories",
     )
 
-    def remote_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self, device: str) -> str | None:
         """NA-MPNN needs a local repo checkout + checkpoint that can't be staged to cloud."""
         return (
             "NA-MPNN requires a local repository checkout and checkpoint on disk, which "
-            "can't be staged to device='proto'. Run locally with device='cuda' or 'cpu'."
+            f"can't be staged to device='{device}'. Run locally with device='cuda' or 'cpu'."
         )
 
 

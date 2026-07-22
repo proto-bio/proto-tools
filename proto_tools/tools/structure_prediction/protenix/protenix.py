@@ -380,13 +380,13 @@ class ProtenixConfig(MSAStructurePredictionConfig):
             self.num_diffusion_steps = steps
         return self
 
-    def remote_unsupported_reason(self) -> str | None:
-        """``protenix-v2`` is ByteDance-gated and not hosted for cloud execution."""
-        if self.model_name == _PROTENIX_V2_MODEL:
+    def remote_unsupported_reason(self, device: str) -> str | None:
+        """``protenix-v2`` is ByteDance-gated, so Proto cannot host it; self-hosting is unaffected."""
+        if device == "proto" and self.model_name == _PROTENIX_V2_MODEL:
             return (
-                "The 'protenix-v2' checkpoint is gated by ByteDance and is not available for "
-                "cloud execution. Choose a different model_name, or run locally (device='cpu' "
-                "or 'cuda') with manually provisioned weights."
+                "The 'protenix-v2' checkpoint is gated by ByteDance and is not hosted on "
+                "device='proto'. Choose a different model_name, run locally (device='cpu' or "
+                "'cuda'), or deploy it yourself with device='modal'."
             )
         return None
 

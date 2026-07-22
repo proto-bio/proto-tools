@@ -303,7 +303,7 @@ def test_proto_blocks_unsupported_config(fake_proto_client, clean_registry):
     """device='proto' with a config whose ``remote_unsupported_reason()`` is non-None fails fast, never dispatches."""
 
     class _LocalOnlyConfig(_CloudConfig):
-        def remote_unsupported_reason(self) -> str | None:
+        def remote_unsupported_reason(self, device: str) -> str | None:
             return "needs a local database file"
 
     spec = _register_cloud_tool(clean_registry, "local-only-config", config_class=_LocalOnlyConfig)
@@ -317,7 +317,7 @@ def test_proto_blocks_unsupported_config(fake_proto_client, clean_registry):
 
 def test_base_config_remote_unsupported_reason_defaults_none():
     """The default hook returns None so ordinary tools still dispatch to cloud."""
-    assert _CloudConfig().remote_unsupported_reason() is None
+    assert _CloudConfig().remote_unsupported_reason("proto") is None
 
 
 def test_local_file_tools_declare_cloud_unsupported():
@@ -326,10 +326,12 @@ def test_local_file_tools_declare_cloud_unsupported():
     from proto_tools.tools.gene_annotation.pyhmmer.hmmsearch import PyHmmsearchConfig
     from proto_tools.tools.sequence_alignment.blast.blast_search import BlastSearchConfig
 
-    assert BlastSearchConfig(search_mode="local", local_db="/db").remote_unsupported_reason() is not None
-    assert BlastSearchConfig(search_mode="online").remote_unsupported_reason() is None  # online (NCBI) is cloud-OK
-    assert PyHmmscanConfig().remote_unsupported_reason() is not None
-    assert PyHmmsearchConfig().remote_unsupported_reason() is not None
+    assert BlastSearchConfig(search_mode="local", local_db="/db").remote_unsupported_reason("proto") is not None
+    assert (
+        BlastSearchConfig(search_mode="online").remote_unsupported_reason("proto") is None
+    )  # online (NCBI) is cloud-OK
+    assert PyHmmscanConfig().remote_unsupported_reason("proto") is not None
+    assert PyHmmsearchConfig().remote_unsupported_reason("proto") is not None
 
 
 def test_local_resource_override_configs_declare_cloud_unsupported():
@@ -354,17 +356,17 @@ def test_local_resource_override_configs_declare_cloud_unsupported():
         MalinoisGradientConfig(),
         BioEmuConfig(),
     ):
-        assert cfg.remote_unsupported_reason() is None
+        assert cfg.remote_unsupported_reason("proto") is None
 
     # An explicitly-set local override is rejected before dispatch.
-    assert Evo2SampleConfig(local_path="/w").remote_unsupported_reason() is not None
-    assert Evo2ScoringConfig(local_path="/w").remote_unsupported_reason() is not None
-    assert ProGen2SampleConfig(local_path="/w").remote_unsupported_reason() is not None
-    assert ProGen2ScoringConfig(local_path="/w").remote_unsupported_reason() is not None
-    assert MalinoisScoreConfig(artifact_path="/a").remote_unsupported_reason() is not None
-    assert MalinoisScoreConfig(malinois_dir="/d").remote_unsupported_reason() is not None
-    assert MalinoisGradientConfig(malinois_dir="/d").remote_unsupported_reason() is not None
-    assert BioEmuConfig(denoiser_config="steer.yaml").remote_unsupported_reason() is not None
+    assert Evo2SampleConfig(local_path="/w").remote_unsupported_reason("proto") is not None
+    assert Evo2ScoringConfig(local_path="/w").remote_unsupported_reason("proto") is not None
+    assert ProGen2SampleConfig(local_path="/w").remote_unsupported_reason("proto") is not None
+    assert ProGen2ScoringConfig(local_path="/w").remote_unsupported_reason("proto") is not None
+    assert MalinoisScoreConfig(artifact_path="/a").remote_unsupported_reason("proto") is not None
+    assert MalinoisScoreConfig(malinois_dir="/d").remote_unsupported_reason("proto") is not None
+    assert MalinoisGradientConfig(malinois_dir="/d").remote_unsupported_reason("proto") is not None
+    assert BioEmuConfig(denoiser_config="steer.yaml").remote_unsupported_reason("proto") is not None
 
 
 # ─ parse_device_string ───────────────────────────────────────────────────────
@@ -925,3 +927,93 @@ def test_explicit_api_key_overrides_env(fake_proto_client, arm_stub_client, monk
     client = fake_proto_client.last_instance
     assert client is not None
     assert client.kwargs == {"api_key": "explicit-key"}
+
+
+# ---------------------------------------------------------------------------
+# Device validation and per-device remote restrictions
+# ---------------------------------------------------------------------------
+
+VALID_DEVICE_STRINGS = [
+    "cpu",
+    "cuda",
+    "cuda:0",
+    "cuda:7",
+    "cudax2",
+    "cudax64",
+    "cuda:0,1",
+    "cuda:0,1,2",
+    "cuda:1,cuda:2",
+    "cuda:0,cuda:1,cuda:2",
+    " cpu ",
+    "cuda:0, 1",
+    "proto",
+    "modal",
+]
+
+INVALID_DEVICE_STRINGS = ["banana", "gpu", "cuda:-1", "0,1", "cuda:", "cudax0", "CUDA:0", "Cuda"]
+
+
+@pytest.mark.parametrize("device", VALID_DEVICE_STRINGS)
+def test_base_config_accepts_every_supported_device_form(device):
+    """Validation is syntactic, so every documented form works without that hardware present."""
+    from proto_tools.utils.base_config import BaseConfig
+
+    assert BaseConfig(device=device).device == device
+
+
+@pytest.mark.parametrize("device", INVALID_DEVICE_STRINGS)
+def test_base_config_rejects_malformed_devices(device):
+    """A typo used to survive construction and fail much later, at dispatch."""
+    from pydantic import ValidationError
+
+    from proto_tools.utils.base_config import BaseConfig
+
+    with pytest.raises(ValidationError):
+        BaseConfig(device=device)
+
+
+def test_modal_is_a_remote_device():
+    """device='modal' must partition like a remote target, not a local GPU request."""
+    from proto_tools.utils.device import is_remote_device, parse_device_string
+
+    spec = parse_device_string("modal")
+    assert (spec.kind, spec.count) == ("modal", 1)
+    assert is_remote_device("modal") and is_remote_device("proto")
+    assert not is_remote_device("cuda:0")
+
+
+def test_proto_hosting_limits_do_not_apply_to_modal():
+    """Proto's hosting restrictions say nothing about compute the caller owns."""
+    from proto_tools.tools.masked_models.esm2.esm2_score import ESM2ScoringConfig
+    from proto_tools.tools.structure_prediction.protenix.protenix import ProtenixConfig
+
+    esm2 = ESM2ScoringConfig(model_checkpoint="esm2_t48_15B_UR50D")
+    assert esm2.remote_unsupported_reason("proto") is not None
+    assert esm2.remote_unsupported_reason("modal") is None
+
+    protenix = ProtenixConfig(model_name="protenix-v2")
+    assert protenix.remote_unsupported_reason("proto") is not None
+    assert protenix.remote_unsupported_reason("modal") is None
+
+
+def test_local_resource_restrictions_apply_to_every_remote_device():
+    """A local file is unstageable anywhere, so it must be refused on all remotes."""
+    from proto_tools.tools.gene_annotation.pyhmmer.hmmscan import PyHmmscanConfig
+
+    cfg = PyHmmscanConfig()
+    for device in ("proto", "modal"):
+        assert cfg.remote_unsupported_reason(device) is not None
+
+
+def test_no_config_defines_the_legacy_hook_signature():
+    """The no-arg hook silently stops being called, so it must not creep back in."""
+    import inspect
+
+    from proto_tools.tools import ToolRegistry
+
+    stale = []
+    for spec in ToolRegistry.list_all():
+        hook = spec.config_model.remote_unsupported_reason
+        if "device" not in inspect.signature(hook).parameters:
+            stale.append(spec.key)
+    assert not stale, f"configs still using the no-arg hook: {stale}"

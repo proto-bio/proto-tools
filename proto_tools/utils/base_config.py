@@ -7,7 +7,7 @@ import json
 import random
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
 
 from proto_tools.utils.tool_io import (
@@ -190,7 +190,7 @@ class BaseConfig(BaseModel):
             - ``"cpu"`` → 0 (no GPUs needed)
             - ``"cuda"`` / ``"cuda:N"`` → 1
             - ``"cudaxN"`` / ``"cuda:0,cuda:1"`` → N
-            - ``"proto"`` → 1 (remote dispatch handled before pool partitioning)
+            - ``"proto"`` / ``"modal"`` → 1 (remote dispatch happens before pool partitioning)
 
         Override in subclasses when GPU need is decoupled from the device
         string — e.g. a model whose large checkpoint needs 4 GPUs regardless
@@ -270,15 +270,50 @@ class BaseConfig(BaseModel):
         """
         return self.timeout
 
+    @field_validator("device")
+    @classmethod
+    def _validate_device(cls, value: str) -> str:
+        """Reject malformed device strings at construction rather than at dispatch.
+
+        Parsing is purely syntactic, so this stays independent of the hardware
+        actually present: ``"cuda:7"`` validates on a machine with no GPU. Whether
+        a remote device can run *this* tool is a separate question, answered at
+        dispatch where the tool key is known.
+
+        Args:
+            value (str): Device string being validated.
+
+        Returns:
+            str: The device string, unchanged.
+
+        Raises:
+            ValueError: If the string is not a recognized device form.
+        """
+        from proto_tools.utils.device import parse_device_string
+
+        parse_device_string(value)
+        return value
+
     def preprocess(self, inputs: BaseToolInput) -> BaseToolInput:
         """Transform inputs before tool execution. Override in subclasses."""
         return inputs
 
-    def remote_unsupported_reason(self) -> str | None:
-        """Reason this config can't run on a remote device, or ``None`` if it can.
+    def remote_unsupported_reason(self, device: str) -> str | None:  # noqa: ARG002 — overrides use it
+        """Reason this config can't run on ``device``, or ``None`` if it can.
 
         Override in a tool's config to fail fast at dispatch when a setting needs a local
-        resource (e.g. a local database or file) that can't be staged to the hosted service.
+        resource (e.g. a local database or file) that can't be staged to a remote worker.
         The returned message is surfaced to the caller; ``None`` (the default) means compatible.
+
+        Takes the device because remote targets differ in what they can run. A local file
+        is unstageable everywhere and should be refused regardless, but a restriction that
+        reflects what Proto chooses to host says nothing about a deployment the caller
+        owns and pays for — those must branch on ``device``.
+
+        Args:
+            device (str): Remote device being targeted, e.g. ``"proto"`` or ``"modal"``.
+
+        Returns:
+            str | None: User-facing reason, or ``None`` when the config is compatible.
         """
         return None

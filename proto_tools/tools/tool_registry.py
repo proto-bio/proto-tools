@@ -620,7 +620,7 @@ class ToolRegistry:
                         elif not is_proto_hostable(key):
                             raise ValueError(proto_unhostable_message(key))
                         # Fail fast on a config no remote device can run (e.g. a local database/file).
-                        elif (reason := config.remote_unsupported_reason()) is not None:
+                        elif (reason := config.remote_unsupported_reason(device_str)) is not None:
                             raise ValueError(f"{key}: {reason}")
                         else:
                             try:

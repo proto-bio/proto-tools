@@ -73,7 +73,7 @@ def test_config_exposes_no_path_fields():
 
 def test_config_cloud_unsupported():
     """DeepPBS cannot run on device='proto' (needs local repo/X3DNA)."""
-    assert DeepPBSSpecificityConfig().remote_unsupported_reason() is not None
+    assert DeepPBSSpecificityConfig().remote_unsupported_reason("proto") is not None
 
 
 # ── Dispatch (mocked) ─────────────────────────────────────────────────────────

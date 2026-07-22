@@ -37,10 +37,10 @@ class DeviceSpec:
     """Structured result from :func:`parse_device_string`.
 
     Attributes:
-        kind (str): ``"cpu"``, ``"cuda"``, or ``"proto"``.
+        kind (str): ``"cpu"``, ``"cuda"``, ``"proto"``, or ``"modal"``.
         devices (list[str] | None): Explicit device IDs when provided (e.g. ``["cuda:0"]``),
             ``None`` for auto-allocate CUDA.
-        count (int): Number of CUDA devices requested (always 1 for cpu and proto).
+        count (int): Number of CUDA devices requested (always 1 for cpu and remote devices).
     """
 
     kind: str
@@ -291,12 +291,25 @@ def _validate_cuda_index(idx_str: str, device: str) -> int:
     return idx
 
 
+# Device strings that dispatch the tool somewhere else instead of running it
+# locally. "proto" is Proto's hosted service; "modal" is the caller's own
+# Modal deployment. What each can run differs, so availability is decided per
+# device rather than shared.
+_REMOTE_DEVICES: frozenset[str] = frozenset({"proto", "modal"})
+
+
+def is_remote_device(device: str) -> bool:
+    """Return whether ``device`` dispatches elsewhere rather than running locally."""
+    return device.strip() in _REMOTE_DEVICES
+
+
 def parse_device_string(device: str) -> DeviceSpec:
     """Parse a device string into a structured :class:`DeviceSpec`.
 
-    Supports CPU, CUDA (single/multi, auto/explicit), and ``"proto"`` device
-    strings. ``"proto"`` runs the tool on Proto's remote execution service
-    (see :mod:`proto_tools.proto`); its ``count`` is always 1.
+    Supports CPU, CUDA (single/multi, auto/explicit), and the remote device
+    strings ``"proto"`` and ``"modal"``. ``"proto"`` runs the tool on Proto's
+    hosted service (see :mod:`proto_tools.proto`); ``"modal"`` runs it on the
+    caller's own Modal deployment. Both always have ``count`` 1.
 
     Args:
         device (str): Device string to parse.
@@ -309,6 +322,8 @@ def parse_device_string(device: str) -> DeviceSpec:
         DeviceSpec(kind='cpu', devices=['cpu'], count=1)
         >>> parse_device_string("proto")
         DeviceSpec(kind='proto', devices=['proto'], count=1)
+        >>> parse_device_string("modal")
+        DeviceSpec(kind='modal', devices=['modal'], count=1)
         >>> parse_device_string("cuda")
         DeviceSpec(kind='cuda', devices=None, count=1)
         >>> parse_device_string("cudax2")
@@ -327,9 +342,10 @@ def parse_device_string(device: str) -> DeviceSpec:
     if device == "cpu":
         return DeviceSpec(kind="cpu", devices=["cpu"], count=1)
 
-    # Proto's hosted service (dispatch delegated to proto_tools.proto)
-    if device == "proto":
-        return DeviceSpec(kind="proto", devices=["proto"], count=1)
+    # Remote devices. Dispatch is delegated before pool partitioning, so the
+    # count is nominal: the remote side decides its own physical hardware.
+    if device in _REMOTE_DEVICES:
+        return DeviceSpec(kind=device, devices=[device], count=1)
 
     # Auto-allocate N GPUs: "cudax2", "cudax3", etc.
     if device.startswith("cudax"):
