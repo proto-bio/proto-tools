@@ -506,7 +506,7 @@ class BlastSearchConfig(BaseConfig):
 
         return self
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """Local-DB search can't run on the hosted cloud — the database lives on the caller's machine."""
         if self.search_mode == "local":
             return (

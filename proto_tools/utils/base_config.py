@@ -76,7 +76,7 @@ class BaseConfig(BaseModel):
         gpus_per_instance: Number of GPUs each worker needs. Default is
             derived from the ``device`` field via :func:`parse_device_string`
             (``cpu`` → 0, ``cuda`` / ``cuda:N`` → 1, ``cudaxN`` / multi → N,
-            ``cloud`` → 1). Override in tool configs where GPU need is
+            ``proto`` → 1). Override in tool configs where GPU need is
             decoupled from the device string — e.g. a large checkpoint that
             needs 2 GPUs regardless of input device, or a tool with a
             separate ``use_gpu`` flag toggling real GPU work. ``ToolPool``
@@ -137,7 +137,7 @@ class BaseConfig(BaseModel):
     device: str = ConfigField(
         title="Device",
         default="cpu",
-        description="Device to run the tool on (e.g., 'cpu', 'cuda', 'cuda:0', 'cloud')",
+        description="Device to run the tool on (e.g., 'cpu', 'cuda', 'cuda:0', 'proto', 'modal')",
         include_in_key=False,
     )
 
@@ -190,7 +190,7 @@ class BaseConfig(BaseModel):
             - ``"cpu"`` → 0 (no GPUs needed)
             - ``"cuda"`` / ``"cuda:N"`` → 1
             - ``"cudaxN"`` / ``"cuda:0,cuda:1"`` → N
-            - ``"cloud"`` → 1 (cloud dispatch handled before pool partitioning)
+            - ``"proto"`` → 1 (remote dispatch handled before pool partitioning)
 
         Override in subclasses when GPU need is decoupled from the device
         string — e.g. a model whose large checkpoint needs 4 GPUs regardless
@@ -274,8 +274,8 @@ class BaseConfig(BaseModel):
         """Transform inputs before tool execution. Override in subclasses."""
         return inputs
 
-    def cloud_unsupported_reason(self) -> str | None:
-        """Reason this config can't run via ``device='cloud'``, or ``None`` if it can.
+    def remote_unsupported_reason(self) -> str | None:
+        """Reason this config can't run on a remote device, or ``None`` if it can.
 
         Override in a tool's config to fail fast at dispatch when a setting needs a local
         resource (e.g. a local database or file) that can't be staged to the hosted service.

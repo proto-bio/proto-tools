@@ -94,7 +94,7 @@ class X3DNAFiberConfig(BaseConfig):
         description="Local X3DNA v2.4 install root (contains bin/fiber); overrides $X3DNA.",
     )
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """X3DNA is a user-provisioned local binary not available on a hosted worker."""
         return (
             "x3dna-fiber requires a local X3DNA v2.4 install (bin/fiber) not available on "

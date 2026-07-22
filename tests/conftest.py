@@ -692,7 +692,7 @@ def pytest_addoption(parser):
         "--use-cloud",
         action="store_true",
         default=False,
-        help="Route every tool run through device='cloud'. Requires PROTO_API_KEY in the environment.",
+        help="Route every tool run through device='proto'. Requires PROTO_API_KEY in the environment.",
     )
     parser.addoption(
         "--benchmark-report",

@@ -1232,7 +1232,7 @@ def test_gpus_per_instance_derived_from_device_string():
     assert BaseConfig(device="cudax2").gpus_per_instance == 2
     assert BaseConfig(device="cudax4").gpus_per_instance == 4
     assert BaseConfig(device="cuda:0,cuda:1").gpus_per_instance == 2
-    assert BaseConfig(device="cloud").gpus_per_instance == 1
+    assert BaseConfig(device="proto").gpus_per_instance == 1
 
 
 def test_gpus_per_instance_override():

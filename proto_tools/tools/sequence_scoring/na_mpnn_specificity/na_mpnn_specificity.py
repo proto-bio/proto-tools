@@ -207,7 +207,7 @@ class NAMPNNSpecificityConfig(BaseConfig):
         description="Keep intermediate raw NA-MPNN output directories",
     )
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """NA-MPNN needs a local repo checkout + checkpoint that can't be staged to cloud."""
         return (
             "NA-MPNN requires a local repository checkout and checkpoint on disk, which "

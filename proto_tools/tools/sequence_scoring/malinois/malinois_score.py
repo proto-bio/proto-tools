@@ -292,7 +292,7 @@ class MalinoisScoreConfig(BaseConfig):
             raise ValueError("cell_types must be unique")
         return self
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """Local artifact/metadata overrides aren't present on a hosted worker."""
         if self.artifact_path or self.malinois_dir:
             return "artifact_path/malinois_dir point to local files not available on device='cloud'. Leave them empty (the managed cache is used), or run locally with device='cpu'."
@@ -475,7 +475,7 @@ class MalinoisGradientConfig(BaseConfig):
             raise ValueError("loss_terms cannot be empty")
         return self
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """Local artifact/metadata overrides aren't present on a hosted worker."""
         if self.artifact_path or self.malinois_dir:
             return "artifact_path/malinois_dir point to local files not available on device='cloud'. Leave them empty (the managed cache is used), or run locally with device='cpu'."

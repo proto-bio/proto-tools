@@ -166,7 +166,7 @@ class ESM2SampleConfig(MaskedModelSampleConfig):
         description="Include per-position logits in the output (large; disable to save memory)",
     )
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """The 15B variant is too large to host on Proto's cloud GPUs."""
         if self.model_checkpoint == "esm2_t48_15B_UR50D":
             return "The 15B variant (esm2_t48_15B_UR50D) isn't available with device='cloud'. Choose a smaller variant, or run locally."

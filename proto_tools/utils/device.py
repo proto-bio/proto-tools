@@ -37,10 +37,10 @@ class DeviceSpec:
     """Structured result from :func:`parse_device_string`.
 
     Attributes:
-        kind (str): ``"cpu"``, ``"cuda"``, or ``"cloud"``.
+        kind (str): ``"cpu"``, ``"cuda"``, or ``"proto"``.
         devices (list[str] | None): Explicit device IDs when provided (e.g. ``["cuda:0"]``),
             ``None`` for auto-allocate CUDA.
-        count (int): Number of CUDA devices requested (always 1 for cpu and cloud).
+        count (int): Number of CUDA devices requested (always 1 for cpu and proto).
     """
 
     kind: str
@@ -294,9 +294,9 @@ def _validate_cuda_index(idx_str: str, device: str) -> int:
 def parse_device_string(device: str) -> DeviceSpec:
     """Parse a device string into a structured :class:`DeviceSpec`.
 
-    Supports CPU, CUDA (single/multi, auto/explicit), and ``"cloud"`` device
-    strings. ``"cloud"`` runs the tool on Proto's remote execution service
-    (see :mod:`proto_tools.cloud`); its ``count`` is always 1.
+    Supports CPU, CUDA (single/multi, auto/explicit), and ``"proto"`` device
+    strings. ``"proto"`` runs the tool on Proto's remote execution service
+    (see :mod:`proto_tools.proto`); its ``count`` is always 1.
 
     Args:
         device (str): Device string to parse.
@@ -307,8 +307,8 @@ def parse_device_string(device: str) -> DeviceSpec:
     Examples:
         >>> parse_device_string("cpu")
         DeviceSpec(kind='cpu', devices=['cpu'], count=1)
-        >>> parse_device_string("cloud")
-        DeviceSpec(kind='cloud', devices=['cloud'], count=1)
+        >>> parse_device_string("proto")
+        DeviceSpec(kind='proto', devices=['proto'], count=1)
         >>> parse_device_string("cuda")
         DeviceSpec(kind='cuda', devices=None, count=1)
         >>> parse_device_string("cudax2")
@@ -327,9 +327,9 @@ def parse_device_string(device: str) -> DeviceSpec:
     if device == "cpu":
         return DeviceSpec(kind="cpu", devices=["cpu"], count=1)
 
-    # Cloud (dispatch delegated to proto_tools.cloud when enabled)
-    if device == "cloud":
-        return DeviceSpec(kind="cloud", devices=["cloud"], count=1)
+    # Proto's hosted service (dispatch delegated to proto_tools.proto)
+    if device == "proto":
+        return DeviceSpec(kind="proto", devices=["proto"], count=1)
 
     # Auto-allocate N GPUs: "cudax2", "cudax3", etc.
     if device.startswith("cudax"):

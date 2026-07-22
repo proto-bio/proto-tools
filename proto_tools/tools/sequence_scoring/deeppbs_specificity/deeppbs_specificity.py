@@ -101,7 +101,7 @@ class DeepPBSSpecificityConfig(BaseConfig):
         include_in_key=False,
     )
 
-    def cloud_unsupported_reason(self) -> str | None:
+    def remote_unsupported_reason(self) -> str | None:
         """DeepPBS needs a local repository and X3DNA install not staged to cloud."""
         return (
             "DeepPBS requires a local DeepPBS checkout and its bundled X3DNA install, "

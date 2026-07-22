@@ -304,7 +304,7 @@ class ToolSpec(BaseModel):
         """Whether this tool runs trivially in-process on CPU.
 
         ``True`` iff ``uses_gpu=False`` and ``has_standalone_env=False``;
-        ``device='cloud'`` is a no-op for these tools. Opt out by giving the
+        ``device='proto'`` is a no-op for these tools. Opt out by giving the
         tool a ``standalone/`` directory.
         """
         return not self.uses_gpu and not self.has_standalone_env
@@ -597,37 +597,37 @@ class ToolRegistry:
                         return _finish_dispatched(dispatched)
 
                 # Validate device allocation against tool requirements.
-                # device="cloud" delegates all resource allocation to the cloud
+                # device="proto" delegates all resource allocation to the hosted
                 # service, so local validation is skipped.
                 if hasattr(config, "device"):
                     device_str = str(config.device)
-                    if device_str == "cloud":
-                        from proto_tools.cloud import (
-                            cloud_unhostable_message,
-                            dispatch_to_cloud,
-                            is_cloud_hostable,
+                    if device_str == "proto":
+                        from proto_tools.proto import (
+                            dispatch_to_proto,
+                            is_proto_hostable,
+                            proto_unhostable_message,
                         )
 
                         # local_cpu tools have nothing to offload — rewrite device and fall through.
                         if spec is not None and spec.local_cpu:
                             logger.debug(
-                                "Tool %s: device='cloud' is a no-op for local_cpu tools; running in-process",
+                                "Tool %s: device='proto' is a no-op for local_cpu tools; running in-process",
                                 key,
                             )
                             config = config.model_copy(update={"device": "cpu"})
                             device_str = "cpu"
-                        # Fail fast if the tool's license bars it from Proto's cloud; after the local_cpu no-op.
-                        elif not is_cloud_hostable(key):
-                            raise ValueError(cloud_unhostable_message(key))
-                        # Fail fast on a config the cloud can't run (e.g. a local database/file).
-                        elif (reason := config.cloud_unsupported_reason()) is not None:
+                        # Fail fast if the tool's license bars it from Proto's service; after the local_cpu no-op.
+                        elif not is_proto_hostable(key):
+                            raise ValueError(proto_unhostable_message(key))
+                        # Fail fast on a config no remote device can run (e.g. a local database/file).
+                        elif (reason := config.remote_unsupported_reason()) is not None:
                             raise ValueError(f"{key}: {reason}")
                         else:
                             try:
-                                dispatched = dispatch_to_cloud(key, inputs, config)
+                                dispatched = dispatch_to_proto(key, inputs, config)
                             except Exception as e:
                                 logger.error(
-                                    "Tool %s: cloud dispatch raised %s: %s",
+                                    "Tool %s: proto dispatch raised %s: %s",
                                     key,
                                     type(e).__name__,
                                     e,
