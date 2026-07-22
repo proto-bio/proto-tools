@@ -191,7 +191,16 @@ class AlphaGenomeScoreISMOutput(BaseToolOutput):
         return iter(self.results)
 
 
-AlphaGenomeScoreISMConfig = AlphaGenomeScoreVariantsConfig
+class AlphaGenomeScoreISMConfig(AlphaGenomeScoreVariantsConfig):
+    """Configuration for AlphaGenome ISM variant batch scoring.
+
+    Attributes:
+        model_version (str): AlphaGenome Hugging Face model version.
+        variant_scorers (list[VariantScorerName] | None): Scorer names from the library's
+            ``RECOMMENDED_VARIANT_SCORERS``. ``None`` uses all recommended.
+        organism (Literal['human', 'mouse']): Organism for predictions.
+        device (str): Device to run inference on.
+    """
 
 
 # ============================================================================

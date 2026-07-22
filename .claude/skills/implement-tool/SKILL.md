@@ -107,7 +107,7 @@ The user provides EITHER:
    - `cite.bib`
    - Test file in `tests/{category}_tests/`
 
-4. **Check for shared data models** — If the category has a `shared_data_models.py`, read it. The new tool should extend these base classes rather than creating new ones.
+4. **Check for shared data models** — If the category has a `shared_data_models.py`, read it. The new tool should extend these base classes rather than creating new ones. Input and Output classes may be reused directly across sibling tools. The **Config must be per-tool**: each tool needs its own config class so it carries its own `tool_key` (stamped at registration and checked by `test_config_carries_its_tool_key`). If the shape is identical to a sibling's, subclass it with a one-line docstring rather than registering the shared class twice.
 
 **Output of Phase 1:** Mental model of:
 - The tool's Python API (function signatures, class names)

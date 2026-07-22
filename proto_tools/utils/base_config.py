@@ -5,7 +5,7 @@ Base configuration class for all pydantic configs.
 
 import json
 import random
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
@@ -110,6 +110,13 @@ class BaseConfig(BaseModel):
         use_enum_values=True,  # Serialize enums as values
         validate_default=True,  # Validate default values
     )
+
+    # The tool this config belongs to, stamped by ``ToolRegistry.register`` at
+    # registration. ``None`` on the base and on any config never registered
+    # (e.g. a shared family base). ``ClassVar`` so pydantic treats it as class
+    # state rather than a field. Registration enforces one config class per
+    # tool, so this is unambiguous for every registered config.
+    tool_key: ClassVar[str | None] = None
 
     verbose: int = ConfigField(
         title="Verbose",
