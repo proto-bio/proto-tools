@@ -111,11 +111,7 @@ class BaseConfig(BaseModel):
         validate_default=True,  # Validate default values
     )
 
-    # The tool this config belongs to, stamped by ``ToolRegistry.register`` at
-    # registration. ``None`` on the base and on any config never registered
-    # (e.g. a shared family base). ``ClassVar`` so pydantic treats it as class
-    # state rather than a field. Registration enforces one config class per
-    # tool, so this is unambiguous for every registered config.
+    # The tool this config belongs to, stamped by ``ToolRegistry.register``; ``None`` until registered.
     tool_key: ClassVar[str | None] = None
 
     verbose: int = ConfigField(
