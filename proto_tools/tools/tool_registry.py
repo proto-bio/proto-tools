@@ -483,12 +483,7 @@ class ToolRegistry:
             if pin_visible_devices and not uses_gpu:
                 raise ValueError(f"@tool({key!r}): pin_visible_devices=True requires uses_gpu=True")
 
-            # Stamp the tool key onto its config class, so a config always knows
-            # which tool it configures. Each tool is expected to own its config
-            # class; two production tools sharing one would leave this stamp
-            # last-write-wins and is caught by test_config_carries_its_tool_key.
-            # Not enforced at runtime here: test fixtures legitimately register
-            # several throwaway tools against one dummy config.
+            # Stamp the tool key onto its config; one config class per tool is checked by test_config_carries_its_tool_key.
             config_class.tool_key = key
 
             source_file = Path(func.__code__.co_filename)
