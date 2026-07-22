@@ -211,7 +211,7 @@ class NAMPNNSpecificityConfig(BaseConfig):
         """NA-MPNN needs a local repo checkout + checkpoint that can't be staged to cloud."""
         return (
             "NA-MPNN requires a local repository checkout and checkpoint on disk, which "
-            "can't be staged to device='cloud'. Run locally with device='cuda' or 'cpu'."
+            "can't be staged to device='proto'. Run locally with device='cuda' or 'cpu'."
         )
 
 

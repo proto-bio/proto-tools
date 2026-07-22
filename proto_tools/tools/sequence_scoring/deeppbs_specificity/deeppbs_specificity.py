@@ -105,7 +105,7 @@ class DeepPBSSpecificityConfig(BaseConfig):
         """DeepPBS needs a local repository and X3DNA install not staged to cloud."""
         return (
             "DeepPBS requires a local DeepPBS checkout and its bundled X3DNA install, "
-            "which are not available on device='cloud'. Run locally with device='cpu'."
+            "which are not available on device='proto'. Run locally with device='cpu'."
         )
 
 

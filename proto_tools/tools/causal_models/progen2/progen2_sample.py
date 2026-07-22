@@ -135,7 +135,7 @@ class ProGen2SampleConfig(CausalModelSampleConfig):
     def remote_unsupported_reason(self) -> str | None:
         """A local weights directory (``local_path``) isn't present on a hosted worker."""
         if self.local_path:
-            return "local_path points to a local weights directory not available on device='cloud'. Unset it, or run locally with device='cpu'."
+            return "local_path points to a local weights directory not available on device='proto'. Unset it, or run locally with device='cpu'."
         return None
 
 

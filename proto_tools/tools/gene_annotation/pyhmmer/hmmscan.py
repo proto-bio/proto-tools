@@ -88,7 +88,7 @@ class PyHmmscanConfig(PyHmmerConfig):
 
     def remote_unsupported_reason(self) -> str | None:
         """Reads a local HMM database file (``hmm_db``) that can't be staged to the hosted cloud."""
-        return "needs a local HMM database file (hmm_db) that can't be staged to device='cloud'. Run locally with device='cpu'."
+        return "needs a local HMM database file (hmm_db) that can't be staged to device='proto'. Run locally with device='cpu'."
 
 
 # ============================================================================

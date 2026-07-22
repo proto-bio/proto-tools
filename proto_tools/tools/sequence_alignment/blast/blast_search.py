@@ -511,7 +511,7 @@ class BlastSearchConfig(BaseConfig):
         if self.search_mode == "local":
             return (
                 "search_mode='local' needs a local BLAST database, which can't be staged to "
-                "device='cloud'. Use search_mode='online', or run locally with device='cpu'."
+                "device='proto'. Use search_mode='online', or run locally with device='cpu'."
             )
         return None
 

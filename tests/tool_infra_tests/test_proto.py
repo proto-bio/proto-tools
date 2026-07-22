@@ -241,7 +241,7 @@ def _register_cloud_tool(
 # ─ cloud hostability gate (license redistribution) ───────────────────────────
 
 
-def test_is_cloud_hostable_reads_redistribution(monkeypatch):
+def test_is_proto_hostable_reads_redistribution(monkeypatch):
     """``is_proto_hostable`` reflects the tool's license ``redistribution`` flag, failing closed."""
     from proto_tools.proto import is_proto_hostable
 
@@ -265,7 +265,7 @@ def test_is_cloud_hostable_reads_redistribution(monkeypatch):
     assert is_proto_hostable("any-tool") is False
 
 
-def test_is_cloud_hostable_fails_closed_on_malformed_license(monkeypatch):
+def test_is_proto_hostable_fails_closed_on_malformed_license(monkeypatch):
     """A corrupt/unreadable license.yaml (a non-ValueError from get_license) blocks cloud instead of crashing the run."""
     import yaml
 
@@ -315,7 +315,7 @@ def test_proto_blocks_unsupported_config(fake_proto_client, clean_registry):
     assert fake_proto_client.last_instance is None
 
 
-def test_base_config_cloud_unsupported_reason_defaults_none():
+def test_base_config_remote_unsupported_reason_defaults_none():
     """The default hook returns None so ordinary tools still dispatch to cloud."""
     assert _CloudConfig().remote_unsupported_reason() is None
 

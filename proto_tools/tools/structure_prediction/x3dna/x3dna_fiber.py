@@ -98,7 +98,7 @@ class X3DNAFiberConfig(BaseConfig):
         """X3DNA is a user-provisioned local binary not available on a hosted worker."""
         return (
             "x3dna-fiber requires a local X3DNA v2.4 install (bin/fiber) not available on "
-            "device='cloud'. Run locally with device='cpu'."
+            "device='proto'. Run locally with device='cpu'."
         )
 
 

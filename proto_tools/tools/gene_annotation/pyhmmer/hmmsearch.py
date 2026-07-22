@@ -89,7 +89,7 @@ class PyHmmsearchConfig(PyHmmerConfig):
 
     def remote_unsupported_reason(self) -> str | None:
         """Reads a local HMM file (``hmm``) that can't be staged to the hosted cloud."""
-        return "needs a local HMM file (hmm) that can't be staged to device='cloud'. Run locally with device='cpu'."
+        return "needs a local HMM file (hmm) that can't be staged to device='proto'. Run locally with device='cpu'."
 
 
 # ============================================================================

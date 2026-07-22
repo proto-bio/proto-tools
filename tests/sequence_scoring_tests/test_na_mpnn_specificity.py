@@ -49,7 +49,7 @@ def test_proto_unsupported_reason_is_always_set():
     """NA-MPNN needs local repo + checkpoint, so cloud is unconditionally rejected."""
     reason = NAMPNNSpecificityConfig().remote_unsupported_reason()
     assert reason is not None
-    assert "cloud" in reason
+    assert "proto" in reason
 
 
 # -- Registration ----------------------------------------------------------------------
