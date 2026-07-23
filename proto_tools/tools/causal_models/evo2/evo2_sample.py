@@ -224,6 +224,7 @@ def example_input() -> Any:
     example_input=example_input,
     iterable_input_fields=["prompts"],
     iterable_output_field="sequences",
+    max_chunk_size=32,
 )
 def run_evo2_sample(
     inputs: Evo2SampleInput,

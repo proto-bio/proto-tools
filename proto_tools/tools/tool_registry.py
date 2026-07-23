@@ -256,6 +256,16 @@ class ToolSpec(BaseModel):
         exclude=True,
         description="Output field name containing the iterable list of results (for ToolPool fan-out)",
     )
+    max_chunk_size: int | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Largest number of iterable items sent to one worker per call when fanning out "
+            "(e.g. across Modal containers); the framework may hand out a smaller chunk but never "
+            "a larger one. Set iff the tool is iterable. Required to be explicit when the config has "
+            "a batch_size field (a tool that batches must state its granularity); otherwise defaults to 1."
+        ),
+    )
     cacheable: bool = Field(
         default=False,
         exclude=True,
@@ -398,6 +408,7 @@ class ToolRegistry:
         example_input: Callable[[], BaseToolInput] | None = None,
         iterable_input_fields: list[str] | None = None,
         iterable_output_field: str | None = None,
+        max_chunk_size: int | None = None,
         cacheable: bool = False,
         stochastic: bool = False,
         post_process_iterable: Callable[[list[Any]], None] | None = None,
@@ -441,6 +452,10 @@ class ToolRegistry:
                 (e.g. structure-prediction ``["complexes", "msas"]``).
             iterable_output_field (str | None): Output field name containing the iterable list of
                 results for ToolPool fan-out and per-item caching.
+            max_chunk_size (int | None): Largest number of iterable items sent to one worker per
+                call when fanning out; the framework may hand out a smaller chunk, never larger.
+                Valid only for iterable tools. Required to be explicit when the config has a
+                ``batch_size`` field; other iterable tools default to 1 (per-item).
             cacheable (bool): Declares that this tool's output is a
                 deterministic function of (input, config), making it
                 eligible for the program-scoped cache and the framework's
@@ -476,6 +491,21 @@ class ToolRegistry:
                 raise ValueError(
                     f"@tool({key!r}): iterable_input_fields and iterable_output_field must both be set or both None"
                 )
+
+            # Fan-out granularity: iterable-only; explicit when the config batches; else default 1.
+            if iterable_input_fields is None:
+                if max_chunk_size is not None:
+                    raise ValueError(f"@tool({key!r}): max_chunk_size is only valid for iterable tools")
+                resolved_max_chunk_size: int | None = None
+            else:
+                if "batch_size" in config_class.model_fields and max_chunk_size is None:
+                    raise ValueError(
+                        f"@tool({key!r}): this tool has a batch_size config, so max_chunk_size must be set "
+                        f"explicitly (pass 1 for per-item fan-out, or a larger batch)."
+                    )
+                resolved_max_chunk_size = 1 if max_chunk_size is None else max_chunk_size
+                if resolved_max_chunk_size < 1:
+                    raise ValueError(f"@tool({key!r}): max_chunk_size must be >= 1, got {resolved_max_chunk_size}")
 
             if gpu_only and not uses_gpu:
                 raise ValueError(f"@tool({key!r}): gpu_only=True requires uses_gpu=True")
@@ -949,6 +979,7 @@ class ToolRegistry:
                 example_input=example_input,
                 iterable_input_fields=iterable_input_fields,
                 iterable_output_field=iterable_output_field,
+                max_chunk_size=resolved_max_chunk_size,
                 cacheable=cacheable,
                 stochastic=stochastic,
                 post_process_iterable=post_process_iterable,

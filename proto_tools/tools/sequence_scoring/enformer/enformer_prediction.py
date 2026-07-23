@@ -316,6 +316,7 @@ def example_input() -> Any:
     example_input=example_input,
     iterable_input_fields=["sequences"],
     iterable_output_field="results",
+    max_chunk_size=32,
 )
 def run_enformer(inputs: EnformerInput, config: EnformerConfig, instance: Any = None) -> EnformerOutput:
     """Predict regulatory activity with Enformer.

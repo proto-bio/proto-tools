@@ -147,3 +147,24 @@ def test_config_carries_its_tool_key(spec):
     assert "tool_key" not in config_model.model_fields, (
         f"{config_model.__name__}.tool_key leaked into model_fields; it must stay a ClassVar."
     )
+
+
+# ── Fan-out granularity (max_chunk_size) ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("spec", ToolRegistry.list_all(), ids=lambda s: s.key)
+def test_iterable_tools_declare_max_chunk_size(spec):
+    """A tool that can fan out must state its granularity; others must not carry the knob.
+
+    Biconditional: max_chunk_size is set iff the tool is iterable. Registration
+    additionally requires it to be *explicit* when the config has a batch_size
+    field (a batching tool must not be left at the implicit default).
+    """
+    if spec.iterable_input_fields is not None:
+        assert isinstance(spec.max_chunk_size, int) and spec.max_chunk_size >= 1, (
+            f"{spec.key}: iterable tools must declare max_chunk_size >= 1, got {spec.max_chunk_size!r}."
+        )
+    else:
+        assert spec.max_chunk_size is None, (
+            f"{spec.key}: max_chunk_size only applies to iterable tools, got {spec.max_chunk_size!r}."
+        )

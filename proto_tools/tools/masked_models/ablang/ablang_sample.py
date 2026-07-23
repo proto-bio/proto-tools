@@ -125,6 +125,7 @@ def example_input() -> AbLangSampleInput:
     example_input=example_input,
     iterable_input_fields=["antibodies"],
     iterable_output_field="sequences",
+    max_chunk_size=32,
     cacheable=True,
     stochastic=True,
 )

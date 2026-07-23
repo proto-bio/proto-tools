@@ -2009,3 +2009,75 @@ def test_iterable_dispatch_respects_effective_timeout_override(clean_registry):
         "effective_timeout() override returning None must be honored — scaling must not "
         "fire model_copy and contaminate model_fields_set"
     )
+
+
+class _BatchingConfig(BaseConfig):
+    """A config that batches — has a batch_size field, so max_chunk_size must be explicit."""
+
+    batch_size: int = ConfigField(default=8, ge=1, title="Batch Size", description="Items per forward pass")
+
+
+class _IterInput(BaseToolInput):
+    items: list[str] = Field(default_factory=list, description="Items to process")
+
+
+class _IterOutput(MockToolOutputBase):
+    results: list[str] = Field(default_factory=list, description="Per-item results")
+
+
+def test_batch_size_tool_requires_explicit_max_chunk_size(clean_registry):
+    """A tool with a batch_size config must state its fan-out granularity, never inherit it."""
+    with pytest.raises(ValueError, match="max_chunk_size must be set"):
+
+        @clean_registry.register(
+            key="batching-no-chunk",
+            label="Batching",
+            category="test",
+            input_class=_IterInput,
+            config_class=_BatchingConfig,
+            output_class=_IterOutput,
+            description="batches but omits max_chunk_size",
+            iterable_input_fields=["items"],
+            iterable_output_field="results",
+        )
+        def _f(inputs: _IterInput, config: _BatchingConfig) -> _IterOutput:
+            return _IterOutput(tool_id="batching-no-chunk", execution_time=0.0, success=True, results=[])
+
+
+def test_batch_size_tool_accepts_explicit_max_chunk_size(clean_registry):
+    """The same tool registers once max_chunk_size is given (1 is allowed — it just must be explicit)."""
+
+    @clean_registry.register(
+        key="batching-ok",
+        label="Batching",
+        category="test",
+        input_class=_IterInput,
+        config_class=_BatchingConfig,
+        output_class=_IterOutput,
+        description="batches with explicit max_chunk_size",
+        iterable_input_fields=["items"],
+        iterable_output_field="results",
+        max_chunk_size=1,
+    )
+    def _f(inputs: _IterInput, config: _BatchingConfig) -> _IterOutput:
+        return _IterOutput(tool_id="batching-ok", execution_time=0.0, success=True, results=[])
+
+    assert clean_registry.get("batching-ok").max_chunk_size == 1
+
+
+def test_non_iterable_tool_rejects_max_chunk_size(clean_registry):
+    """max_chunk_size is meaningless without an iterable field, so it is refused there."""
+    with pytest.raises(ValueError, match="only valid for iterable tools"):
+
+        @clean_registry.register(
+            key="scalar-with-chunk",
+            label="Scalar",
+            category="test",
+            input_class=MockToolInput,
+            config_class=MockToolConfig,
+            output_class=MockToolOutput,
+            description="not iterable but sets max_chunk_size",
+            max_chunk_size=4,
+        )
+        def _f(inputs: MockToolInput, config: MockToolConfig) -> MockToolOutput:
+            return MockToolOutput(tool_id="scalar-with-chunk", execution_time=0.0, success=True, result="x")
