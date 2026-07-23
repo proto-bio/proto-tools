@@ -42,33 +42,25 @@ CKPT_DIR="${WEIGHTS_DIR}/checkpoint"
 mkdir -p "$CKPT_DIR"
 
 HF_REPO="aurekaresearch/OpenDDE"
-HF_BASE="https://huggingface.co/${HF_REPO}/resolve/main"
 
-# Checkpoints live at the HF repo root; OpenDDE expects them under checkpoint/.
-# The repo is public/Apache-2.0, so HF_TOKEN is optional (only lifts rate limits).
-for CKPT in opendde.pt opendde_abag.pt; do
-    if [ ! -f "${CKPT_DIR}/${CKPT}" ]; then
-        echo "Downloading ${CKPT}..."
-        curl -fSL ${HF_TOKEN:+-H "Authorization: Bearer ${HF_TOKEN}"} \
-            -o "${CKPT_DIR}/${CKPT}" "${HF_BASE}/${CKPT}"
-    else
-        echo "${CKPT} already present."
-    fi
-done
+# Fetch checkpoints and the runtime `common/` assets (residue constants, CCD, etc.)
+# from HuggingFace via huggingface_hub — an opendde dependency, installed defensively
+# so this step never relies on transitive resolution. hf_hub verifies size/etag and
+# resumes partial downloads, so re-running setup.sh is idempotent without manual
+# "already present" guards, and it drops the assumption that `curl` is on PATH in the
+# build environment. The repo is public/Apache-2.0, so HF_TOKEN is optional (only
+# lifts rate limits); huggingface_hub reads it from the environment automatically.
+# Checkpoints live at the HF repo root but OpenDDE expects them under checkpoint/, so
+# they are pulled into CKPT_DIR while common/ keeps its prefix under WEIGHTS_DIR.
+echo "Downloading OpenDDE checkpoints and common assets..."
+uv pip install "huggingface_hub"
+python - <<PY
+from huggingface_hub import hf_hub_download, snapshot_download
 
-# Runtime `common/` assets (residue constants, CCD, etc.). Fetch the subtree via
-# huggingface_hub into OPENDDE_ROOT_DIR (snapshot_download preserves the common/
-# prefix). huggingface_hub is an opendde dependency, but install it defensively
-# so this step never depends on transitive resolution.
-if [ ! -d "${WEIGHTS_DIR}/common" ] || [ -z "$(ls -A "${WEIGHTS_DIR}/common" 2>/dev/null)" ]; then
-    echo "Downloading OpenDDE common assets..."
-    uv pip install "huggingface_hub"
-    python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('${HF_REPO}', allow_patterns=['common/*', 'common/**'], local_dir='${WEIGHTS_DIR}')
-"
-else
-    echo "OpenDDE common assets already present."
-fi
+repo = "${HF_REPO}"
+for ckpt in ("opendde.pt", "opendde_abag.pt"):
+    hf_hub_download(repo, ckpt, local_dir="${CKPT_DIR}")
+snapshot_download(repo, allow_patterns=["common/*", "common/**"], local_dir="${WEIGHTS_DIR}")
+PY
 
 echo "OpenDDE setup complete! (OPENDDE_ROOT_DIR=${WEIGHTS_DIR})"
