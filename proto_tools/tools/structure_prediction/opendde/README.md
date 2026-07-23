@@ -21,8 +21,7 @@ The reference implementation is open-sourced at [aurekaresearch/OpenDDE](https:/
 
 ### Learning Resources
 
-- [aurekaresearch/OpenDDE](https://github.com/aurekaresearch/OpenDDE) (Aureka AI Research) - the official repository, with setup instructions, model checkpoints, and usage examples for the co-folding model.
-- [aurekaresearch/OpenDDE on Hugging Face](https://huggingface.co/aurekaresearch/OpenDDE) (Aureka AI Research) - the model card and downloadable checkpoints (`opendde.pt` and `opendde_abag.pt`).
+- [OpenDDE Technical Report](https://huggingface.co/aurekaresearch/OpenDDE/blob/main/docs/OpenDDE_Technical_reports.pdf) (Aureka AI Research) - the technical report describing OpenDDE's architecture, training data, and benchmark results.
 
 ## Tools
 
