@@ -53,8 +53,7 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     ``<job_name>_sample_<rank>.cif`` and a matching
     ``<job_name>_summary_confidence_sample_<rank>.json``. The summary already
     carries scalar confidence values (``plddt`` is the mean pLDDT on a 0-100
-    scale, plus ``ptm``/``iptm``/``gpde``/``ranking_score``); OpenDDE does not emit
-    a per-token PAE matrix by default, so no ``avg_pae`` is reported. The best
+    scale, plus ``ptm``/``iptm``/``gpde``/``ranking_score``); The best
     sample is the one with the highest ``ranking_score``.
 
     Args:
@@ -136,9 +135,8 @@ class OpenDDEModel:
     def load(self) -> None:
         """Resolve ``OPENDDE_ROOT_DIR`` (checkpoints + common assets) and verify it holds weights.
 
-        Precedence mirrors AlphaFold3's approach: an explicit ``OPENDDE_ROOT_DIR``
-        env var (set by the tool layer from ``config.root_dir``) wins, otherwise
-        the managed weights cache is resolved via ``resolve_weights_dir``.
+        Explicit ``OPENDDE_ROOT_DIR`` env var (set by the tool layer from ``config.root_dir``)
+        wins, otherwise the managed weights cache is resolved via ``resolve_weights_dir``.
 
         Raises:
             FileNotFoundError: If no root can be resolved or no checkpoint is present.
