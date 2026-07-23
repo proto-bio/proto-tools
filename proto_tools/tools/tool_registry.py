@@ -483,6 +483,9 @@ class ToolRegistry:
             if pin_visible_devices and not uses_gpu:
                 raise ValueError(f"@tool({key!r}): pin_visible_devices=True requires uses_gpu=True")
 
+            # Stamp the tool key onto its config; one config class per tool is checked by test_config_carries_its_tool_key.
+            config_class.tool_key = key
+
             source_file = Path(func.__code__.co_filename)
 
             @wraps(func)
