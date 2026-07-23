@@ -970,3 +970,106 @@ def test_base_config_rejects_malformed_devices(device):
 
     with pytest.raises(ValidationError):
         BaseConfig(device=device)
+
+
+# ─ device='modal' routing (delegates to the optional proto-modal package) ────
+
+
+def _install_fake_proto_modal(monkeypatch, dispatch):
+    """Inject a stand-in ``proto_modal`` so routing tests run without the real package.
+
+    CI has no proto-modal (it is an optional peer, never a proto-tools
+    dependency), so the router's ``from proto_modal import dispatch_to_modal``
+    must be satisfiable by a fake.
+    """
+    import sys
+    import types
+
+    fake = types.ModuleType("proto_modal")
+    fake.dispatch_to_modal = dispatch
+    monkeypatch.setitem(sys.modules, "proto_modal", fake)
+
+
+def test_device_modal_delegates_and_returns_validated_output(clean_registry, monkeypatch):
+    """device='modal' routes to proto_modal.dispatch_to_modal and validates its result."""
+    captured = {}
+
+    def _dispatch(key, inputs, config):
+        captured["key"] = key
+        captured["payload"] = inputs.payload
+        captured["device"] = config.device
+        return _CloudOutput(result="from-modal")
+
+    _install_fake_proto_modal(monkeypatch, _dispatch)
+    spec = _register_cloud_tool(clean_registry, "modal-tool")  # uses_gpu; local impl asserts if reached
+
+    result = spec.function(_CloudInput(payload="hi"), _CloudConfig(device="modal"))
+
+    assert isinstance(result, _CloudOutput)
+    assert result.result == "from-modal"
+    assert result.success is True
+    assert result.tool_id == "modal-tool"
+    assert captured == {"key": "modal-tool", "payload": "hi", "device": "modal"}
+
+
+def test_device_modal_without_proto_modal_gives_install_hint(clean_registry, monkeypatch):
+    """A user who never installed proto-modal gets an actionable install pointer, not a bare ImportError."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "proto_modal", None)  # forces ImportError on import
+    spec = _register_cloud_tool(clean_registry, "modal-tool-2")
+
+    with pytest.raises(ImportError, match="pip install proto-modal"):
+        spec.function(_CloudInput(payload="hi"), _CloudConfig(device="modal"))
+
+
+def test_device_modal_dispatches_even_local_cpu_tools(clean_registry, monkeypatch):
+    """A CPU tool deployed to Modal must run there when asked, not silently in-process.
+
+    Unlike device='proto' (which no-ops local_cpu tools as a hosting optimization),
+    device='modal' targets the user's own deployment — a deliberate choice to honour.
+    """
+    captured = {}
+
+    def _dispatch(key, inputs, config):
+        captured["key"] = key
+        return _CloudOutput(result="from-modal")
+
+    _install_fake_proto_modal(monkeypatch, _dispatch)
+
+    def _local_impl(inputs, config, instance=None):
+        del inputs, config, instance
+        raise AssertionError("local_cpu tool must dispatch to Modal, not run in-process")
+
+    clean_registry.register(
+        key="modal-local-cpu",
+        label="modal-local-cpu",
+        category="test",
+        input_class=_CloudInput,
+        config_class=_CloudConfig,
+        output_class=_CloudOutput,
+        description="pure-python tool — no GPU, no standalone env",
+    )(_local_impl)
+    spec = clean_registry.get("modal-local-cpu")
+    assert spec.local_cpu is True
+
+    result = spec.function(_CloudInput(payload="hi"), _CloudConfig(device="modal"))
+    assert result.result == "from-modal"
+    assert captured["key"] == "modal-local-cpu"
+
+
+def test_device_modal_blocks_unsupported_config(clean_registry, monkeypatch):
+    """A config needing a local resource fails fast before any dispatch is attempted."""
+
+    class _ModalUnsupportedConfig(_CloudConfig):
+        def remote_unsupported_reason(self, device):
+            return "needs a local database file" if device == "modal" else None
+
+    def _dispatch_should_not_run(key, inputs, config):
+        raise AssertionError("must not dispatch a config that declares itself unsupported")
+
+    _install_fake_proto_modal(monkeypatch, _dispatch_should_not_run)
+    spec = _register_cloud_tool(clean_registry, "modal-tool-3", config_class=_ModalUnsupportedConfig)
+
+    with pytest.raises(ValueError, match="needs a local database file"):
+        spec.function(_CloudInput(payload="hi"), _ModalUnsupportedConfig(device="modal"))

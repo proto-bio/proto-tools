@@ -21,7 +21,7 @@ from collections.abc import Callable, MutableMapping
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import yaml
 from pydantic import BaseModel, Field, field_serializer
@@ -599,9 +599,7 @@ class ToolRegistry:
                             )
                         return _finish_dispatched(dispatched)
 
-                # Validate device allocation against tool requirements.
-                # device="proto" delegates all resource allocation to the hosted
-                # service, so local validation is skipped.
+                # device="proto"/"modal" delegate allocation to the remote side, so local validation is skipped.
                 if hasattr(config, "device"):
                     device_str = str(config.device)
                     if device_str == "proto":
@@ -643,6 +641,37 @@ class ToolRegistry:
                                     traceback.format_exc(),
                                 )
                             return _finish_dispatched(dispatched)
+                    elif device_str == "modal":
+                        # No local_cpu no-op (unlike device="proto"): honour an explicit deployment even for a CPU tool.
+                        # Fail fast on a config no remote device can run (e.g. a local database/file).
+                        if (reason := config.remote_unsupported_reason("modal")) is not None:
+                            raise ValueError(f"{key}: {reason}")
+                        # Import proto-modal lazily: an optional peer that depends on proto-tools, keeping it one-way.
+                        try:
+                            from proto_modal import dispatch_to_modal
+                        except ImportError as exc:
+                            raise ImportError(
+                                "device='modal' requires proto-modal, which is not installed. "
+                                "Install it with:  pip install proto-modal"
+                            ) from exc
+                        try:
+                            # proto_modal is untyped here (optional peer); the result is a BaseToolOutput at runtime.
+                            dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
+                        except Exception as e:
+                            logger.error(
+                                "Tool %s: modal dispatch raised %s: %s",
+                                key,
+                                type(e).__name__,
+                                e,
+                            )
+                            return _make_error_output_or_raise(
+                                output_class,
+                                key,
+                                start_time,
+                                e,
+                                traceback.format_exc(),
+                            )
+                        return _finish_dispatched(dispatched)
                     if gpu_only_flag and device_str == "cpu":
                         raise ValueError(
                             f"Tool {key!r} is gpu_only and rejects device='cpu'; use 'cuda', 'cuda:N', or 'cudaxN'"
