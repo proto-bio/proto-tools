@@ -259,7 +259,7 @@ def example_input() -> Any:
     example_input=example_input,
     iterable_input_fields=["sequences"],
     iterable_output_field="results",
-    max_chunk_size=1,
+    max_chunk_size=32,
 )
 def run_borzoi_ensemble(
     inputs: BorzoiInput,
