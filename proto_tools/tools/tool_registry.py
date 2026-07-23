@@ -148,6 +148,65 @@ def _apply_iter_items(inputs: Any, fields: list[str], items: list[_ParallelItem]
     return inputs.model_copy(update=update)
 
 
+def _run_modal_fanout(
+    key: str,
+    inputs: Any,
+    config: Any,
+    spec: ToolSpec,
+    *,
+    batch_dispatch: Callable[[str, list[Any], Any], list[Any]] | None = None,
+) -> BaseToolOutput:
+    """EXPERIMENTAL reference: fan an iterable ``device="modal"`` call across containers.
+
+    A vertical slice of the fan-out plan, built to experiment on — not the final decomposed
+    path. It mirrors the local fan-out shape (``config.preprocess`` whole-input, then dispatch
+    fans out) so local and modal stay behaviourally identical:
+
+    1. run ``config.preprocess`` once over the whole input, client-side. This preserves the
+       preprocess's own cross-unit dedup — e.g. structure predictors collapse protein
+       sequences shared across complexes into a single batched MMseqs2 search — and keeps
+       network work off the GPU. Model work inside preprocess dispatches to that model's
+       deployment (masking; not yet wired).
+    2. zip the (now MSA-carrying) input into per-unit ``_ParallelItem`` bundles;
+    3. chunk the units by ``spec.max_chunk_size``;
+    4. fan the chunks across containers via ``batch_dispatch`` (Modal ``.map``/``.starmap``).
+       The container re-runs preprocess as a validate-only no-op, since MSAs are pre-attached;
+    5. stitch the per-chunk outputs back into one output, in input order.
+
+    Dedup/caching and partial-failure handling are intentionally omitted; they are layered in
+    later PRs. ``batch_dispatch`` is injectable so the slice can be exercised locally,
+    in-process, without a live Modal deployment.
+    """
+    if batch_dispatch is None:
+        from proto_modal import dispatch_batch_to_modal
+
+        batch_dispatch = dispatch_batch_to_modal
+
+    # (1) Whole-input client-side preprocess — mirrors local fan-out and preserves preprocess's
+    # internal cross-unit dedup (one batched search for sequences shared across complexes).
+    inputs = config.preprocess(inputs)
+
+    # (2) Zip post-preprocess, so bundles carry any field preprocess attached (e.g. msas).
+    fields = _active_iter_fields(inputs, spec)
+    units = _zip_iter_items(inputs, fields)
+    if not units:
+        return cast(BaseToolOutput, batch_dispatch(key, [inputs], config)[0])
+
+    # (3) Chunk. max_chunk_size is the per-container ceiling; never exceed the unit count.
+    chunk_size = max(1, min(spec.max_chunk_size or 1, len(units)))
+    chunks = [units[i : i + chunk_size] for i in range(0, len(units), chunk_size)]
+    chunk_inputs = [_apply_iter_items(inputs, fields, chunk) for chunk in chunks]
+
+    # (4) Fan out across containers.
+    chunk_outputs = batch_dispatch(key, chunk_inputs, config)
+
+    # (5) Stitch the iterable output field back together, in input order.
+    out_field = spec.iterable_output_field
+    assert out_field is not None  # iterable tools validate this at registration
+    stitched = [item for out in chunk_outputs for item in getattr(out, out_field)]
+    return cast(BaseToolOutput, chunk_outputs[0].model_copy(update={out_field: stitched}))
+
+
 class ToolSpec(BaseModel):
     """Specification for a registered tool.
 
@@ -676,17 +735,22 @@ class ToolRegistry:
                         # Fail fast on a config no remote device can run (e.g. a local database/file).
                         if (reason := config.remote_unsupported_reason("modal")) is not None:
                             raise ValueError(f"{key}: {reason}")
-                        # Import proto-modal lazily: an optional peer that depends on proto-tools, keeping it one-way.
                         try:
-                            from proto_modal import dispatch_to_modal
-                        except ImportError as exc:
-                            raise ImportError(
-                                "device='modal' requires proto-modal, which is not installed. "
-                                "Install it with:  pip install proto-modal"
-                            ) from exc
-                        try:
-                            # proto_modal is untyped here (optional peer); the result is a BaseToolOutput at runtime.
-                            dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
+                            # EXPERIMENTAL: iterable tools fan out across containers (per-unit preprocess
+                            # + chunked .map); non-iterable tools keep the single-container dispatch.
+                            if spec is not None and spec.iterable_input_fields:
+                                dispatched = _run_modal_fanout(key, inputs, config, spec)
+                            else:
+                                # Import proto-modal lazily: an optional peer that depends on proto-tools, keeping it one-way.
+                                try:
+                                    from proto_modal import dispatch_to_modal
+                                except ImportError as exc:
+                                    raise ImportError(
+                                        "device='modal' requires proto-modal, which is not installed. "
+                                        "Install it with:  pip install proto-modal"
+                                    ) from exc
+                                # proto_modal is untyped here (optional peer); the result is a BaseToolOutput at runtime.
+                                dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
                         except Exception as e:
                             logger.error(
                                 "Tool %s: modal dispatch raised %s: %s",
