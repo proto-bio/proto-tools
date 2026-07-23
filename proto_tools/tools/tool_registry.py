@@ -644,47 +644,43 @@ class ToolRegistry:
                                 )
                             return _finish_dispatched(dispatched)
                     elif device_str == "modal":
-                        # local_cpu tools have nothing to offload — rewrite device and fall through.
-                        if spec is not None and spec.local_cpu:
-                            logger.debug(
-                                "Tool %s: device='modal' is a no-op for local_cpu tools; running in-process",
-                                key,
-                            )
-                            config = config.model_copy(update={"device": "cpu"})
-                            device_str = "cpu"
+                        # No local_cpu no-op here (unlike device="proto"): a user deploys a
+                        # tool to their own Modal workspace and asks for it by name, so honour
+                        # that even for a CPU tool rather than silently running in-process. An
+                        # undeployed tool surfaces as a clear ToolNotDeployedError from dispatch.
+                        #
                         # Fail fast on a config no remote device can run (e.g. a local database/file).
-                        elif (reason := config.remote_unsupported_reason("modal")) is not None:
+                        if (reason := config.remote_unsupported_reason("modal")) is not None:
                             raise ValueError(f"{key}: {reason}")
-                        else:
-                            # proto-modal is optional and depends on proto-tools; importing it lazily
-                            # keeps that one-way and lets a user without it get a clear install pointer
-                            # rather than an ImportError from deep in dispatch.
-                            try:
-                                from proto_modal import dispatch_to_modal
-                            except ImportError as exc:
-                                raise ImportError(
-                                    "device='modal' requires proto-modal, which is not installed. "
-                                    "Install it with:  pip install proto-modal"
-                                ) from exc
-                            try:
-                                # proto_modal is untyped to proto-tools (optional peer), so the
-                                # result is Any; it is a BaseToolOutput at runtime, like dispatch_to_proto.
-                                dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
-                            except Exception as e:
-                                logger.error(
-                                    "Tool %s: modal dispatch raised %s: %s",
-                                    key,
-                                    type(e).__name__,
-                                    e,
-                                )
-                                return _make_error_output_or_raise(
-                                    output_class,
-                                    key,
-                                    start_time,
-                                    e,
-                                    traceback.format_exc(),
-                                )
-                            return _finish_dispatched(dispatched)
+                        # proto-modal is optional and depends on proto-tools; importing it lazily
+                        # keeps that one-way and lets a user without it get a clear install pointer
+                        # rather than an ImportError from deep in dispatch.
+                        try:
+                            from proto_modal import dispatch_to_modal
+                        except ImportError as exc:
+                            raise ImportError(
+                                "device='modal' requires proto-modal, which is not installed. "
+                                "Install it with:  pip install proto-modal"
+                            ) from exc
+                        try:
+                            # proto_modal is untyped to proto-tools (optional peer), so the
+                            # result is Any; it is a BaseToolOutput at runtime, like dispatch_to_proto.
+                            dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
+                        except Exception as e:
+                            logger.error(
+                                "Tool %s: modal dispatch raised %s: %s",
+                                key,
+                                type(e).__name__,
+                                e,
+                            )
+                            return _make_error_output_or_raise(
+                                output_class,
+                                key,
+                                start_time,
+                                e,
+                                traceback.format_exc(),
+                            )
+                        return _finish_dispatched(dispatched)
                     if gpu_only_flag and device_str == "cpu":
                         raise ValueError(
                             f"Tool {key!r} is gpu_only and rejects device='cpu'; use 'cuda', 'cuda:N', or 'cudaxN'"

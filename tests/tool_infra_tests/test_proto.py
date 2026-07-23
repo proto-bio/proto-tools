@@ -1023,19 +1023,23 @@ def test_device_modal_without_proto_modal_gives_install_hint(clean_registry, mon
         spec.function(_CloudInput(payload="hi"), _CloudConfig(device="modal"))
 
 
-def test_device_modal_noops_for_local_cpu(clean_registry, monkeypatch):
-    """A pure-CPU tool runs in-process instead of spinning a Modal container for nothing."""
-    import sys
+def test_device_modal_dispatches_even_local_cpu_tools(clean_registry, monkeypatch):
+    """A CPU tool deployed to Modal must run there when asked, not silently in-process.
 
-    def _dispatch_should_not_run(key, inputs, config):
-        raise AssertionError(f"local_cpu tool {key!r} must not dispatch to Modal")
+    Unlike device='proto' (which no-ops local_cpu tools as a hosting optimization),
+    device='modal' targets the user's own deployment — a deliberate choice to honour.
+    """
+    captured = {}
 
-    _install_fake_proto_modal(monkeypatch, _dispatch_should_not_run)
+    def _dispatch(key, inputs, config):
+        captured["key"] = key
+        return _CloudOutput(result="from-modal")
+
+    _install_fake_proto_modal(monkeypatch, _dispatch)
 
     def _local_impl(inputs, config, instance=None):
-        del instance
-        assert config.device == "cpu"  # device rewritten from "modal"
-        return _CloudOutput(result=f"local:{inputs.payload}")
+        del inputs, config, instance
+        raise AssertionError("local_cpu tool must dispatch to Modal, not run in-process")
 
     clean_registry.register(
         key="modal-local-cpu",
@@ -1050,8 +1054,8 @@ def test_device_modal_noops_for_local_cpu(clean_registry, monkeypatch):
     assert spec.local_cpu is True
 
     result = spec.function(_CloudInput(payload="hi"), _CloudConfig(device="modal"))
-    assert result.result == "local:hi"
-    assert sys.modules["proto_modal"] is not None  # fake stayed installed; just never called
+    assert result.result == "from-modal"
+    assert captured["key"] == "modal-local-cpu"
 
 
 def test_device_modal_blocks_unsupported_config(clean_registry, monkeypatch):
