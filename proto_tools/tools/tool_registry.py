@@ -599,9 +599,7 @@ class ToolRegistry:
                             )
                         return _finish_dispatched(dispatched)
 
-                # Validate device allocation against tool requirements.
-                # device="proto"/"modal" delegate all resource allocation to the
-                # remote side, so local validation is skipped.
+                # device="proto"/"modal" delegate allocation to the remote side, so local validation is skipped.
                 if hasattr(config, "device"):
                     device_str = str(config.device)
                     if device_str == "proto":
@@ -644,17 +642,11 @@ class ToolRegistry:
                                 )
                             return _finish_dispatched(dispatched)
                     elif device_str == "modal":
-                        # No local_cpu no-op here (unlike device="proto"): a user deploys a
-                        # tool to their own Modal workspace and asks for it by name, so honour
-                        # that even for a CPU tool rather than silently running in-process. An
-                        # undeployed tool surfaces as a clear ToolNotDeployedError from dispatch.
-                        #
+                        # No local_cpu no-op (unlike device="proto"): honour an explicit deployment even for a CPU tool.
                         # Fail fast on a config no remote device can run (e.g. a local database/file).
                         if (reason := config.remote_unsupported_reason("modal")) is not None:
                             raise ValueError(f"{key}: {reason}")
-                        # proto-modal is optional and depends on proto-tools; importing it lazily
-                        # keeps that one-way and lets a user without it get a clear install pointer
-                        # rather than an ImportError from deep in dispatch.
+                        # Import proto-modal lazily: an optional peer that depends on proto-tools, keeping it one-way.
                         try:
                             from proto_modal import dispatch_to_modal
                         except ImportError as exc:
@@ -663,8 +655,7 @@ class ToolRegistry:
                                 "Install it with:  pip install proto-modal"
                             ) from exc
                         try:
-                            # proto_modal is untyped to proto-tools (optional peer), so the
-                            # result is Any; it is a BaseToolOutput at runtime, like dispatch_to_proto.
+                            # proto_modal is untyped here (optional peer); the result is a BaseToolOutput at runtime.
                             dispatched = cast(BaseToolOutput, dispatch_to_modal(key, inputs, config))
                         except Exception as e:
                             logger.error(
