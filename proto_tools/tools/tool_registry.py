@@ -492,10 +492,7 @@ class ToolRegistry:
                     f"@tool({key!r}): iterable_input_fields and iterable_output_field must both be set or both None"
                 )
 
-            # Fan-out granularity. Only iterable tools fan out, so max_chunk_size is theirs alone.
-            # A tool that batches (has a batch_size config) must state its granularity explicitly —
-            # 1 is allowed, but it must be a conscious choice so a batching model is never left at the
-            # implicit default. Other iterable tools default to per-item (1).
+            # Fan-out granularity: iterable-only; explicit when the config batches; else default 1.
             if iterable_input_fields is None:
                 if max_chunk_size is not None:
                     raise ValueError(f"@tool({key!r}): max_chunk_size is only valid for iterable tools")
