@@ -127,6 +127,7 @@ def example_input() -> MockIterableStochasticSerialInput:
     example_input=example_input,
     iterable_input_fields=["prompts"],
     iterable_output_field="completions",
+    max_chunk_size=1,
     cacheable=True,
     stochastic=True,
 )

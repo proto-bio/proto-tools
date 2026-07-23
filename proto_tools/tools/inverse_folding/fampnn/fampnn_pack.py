@@ -163,6 +163,7 @@ def example_input() -> Any:
     example_input=example_input,
     iterable_input_fields=["inputs"],
     iterable_output_field="packed_structures",
+    max_chunk_size=1,
     cacheable=True,
     stochastic=True,
 )

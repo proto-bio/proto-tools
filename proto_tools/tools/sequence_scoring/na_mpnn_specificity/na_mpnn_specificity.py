@@ -236,6 +236,7 @@ def example_input() -> NAMPNNSpecificityInput:
     example_input=example_input,
     iterable_input_fields=["pdb_paths"],
     iterable_output_field="results",
+    max_chunk_size=1,
 )
 def run_na_mpnn_specificity(
     inputs: NAMPNNSpecificityInput,

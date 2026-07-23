@@ -134,6 +134,7 @@ def example_input() -> MockIterableDeterministicInput:
     example_input=example_input,
     iterable_input_fields=["prompts"],
     iterable_output_field="scores",
+    max_chunk_size=1,
     cacheable=True,
 )
 def run_mock_iterable_deterministic(

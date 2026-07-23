@@ -303,6 +303,7 @@ def example_input() -> Any:
     example_input=example_input,
     iterable_input_fields=["complexes", "msas"],
     iterable_output_field="ensembles",
+    max_chunk_size=1,
 )
 def run_bioemu(inputs: BioEmuInput, config: BioEmuConfig, instance: Any = None) -> BioEmuOutput:
     """Generate protein conformational ensembles using BioEmu."""

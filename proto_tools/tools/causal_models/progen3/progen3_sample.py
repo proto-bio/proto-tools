@@ -131,6 +131,7 @@ def example_input() -> ProGen3SampleInput:
     example_input=example_input,
     iterable_input_fields=["prompts"],
     iterable_output_field="sequences",
+    max_chunk_size=1,
 )
 def run_progen3_sample(
     inputs: ProGen3SampleInput,
