@@ -81,6 +81,8 @@ class OpenDDEMetrics(Metrics):
         gpde (float): Global predicted distance error (lower is better). Always present.
         ranking_score (float): OpenDDE ranking score used to select the best sample. Always present.
         has_clash (bool): Whether the predicted structure has a steric clash. Always present.
+        avg_pae (float): Mean of the per-token PAE matrix in Å. Present when include_pae_matrix=True.
+        pae (list[list[float]]): Full per-token PAE matrix in Å. Present when include_pae_matrix=True.
     """
 
     metric_spec: ClassVar[dict[str, MetricSpec]] = {
@@ -106,6 +108,20 @@ class OpenDDEMetrics(Metrics):
             "type": "bool",
             "min": None,
             "max": None,
+            "better_values_are": "lower",
+        },
+        "avg_pae": {
+            "availability": "when include_pae_matrix=True",
+            "type": "float",
+            "min": 0.0,
+            "max": 32.0,
+            "better_values_are": "lower",
+        },
+        "pae": {
+            "availability": "when include_pae_matrix=True",
+            "type": "list[list[float]]",
+            "min": 0.0,
+            "max": 32.0,
             "better_values_are": "lower",
         },
     }
@@ -172,8 +188,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         msa_search_config (Mmseqs2HomologySearchConfig | None): MMseqs2 search config;
             only used when ``use_msa=True``. Inherited. Default: None.
 
-        include_pae_matrix (bool): Inherited; ignored by OpenDDE, which emits no
-            per-token PAE matrix. Default: False.
+        include_pae_matrix (bool): Inherited. When True, OpenDDE is run with
+            ``--need_atom_confidence`` and the per-token PAE matrix (``pae``) plus a
+            derived ``avg_pae`` scalar are attached to the metrics. Off by default —
+            the matrix is O(n_token^2) to compute and serialize. Default: False.
 
         device (str): Device to run on (``"cuda"``, ``"cpu"``). Inherited. Default: ``"cuda"``.
 
@@ -421,6 +439,7 @@ def run_opendde_on_complex(
             "seed": seed,
             "device": config.device,
             "verbose": config.verbose,
+            "include_pae_matrix": config.include_pae_matrix,
         }
 
         output_data = ToolInstance.dispatch("opendde", input_data, instance=instance, config=config)
@@ -436,6 +455,10 @@ def run_opendde_on_complex(
         "ranking_score": float(formatted_metrics["ranking_score"]),
         "has_clash": bool(formatted_metrics["has_clash"]),
     }
+    # PAE is only present when include_pae_matrix requested it (--need_atom_confidence).
+    if "pae" in formatted_metrics:
+        metrics_dict["avg_pae"] = float(formatted_metrics["avg_pae"])
+        metrics_dict["pae"] = formatted_metrics["pae"]
 
     structure = Structure(
         structure=cif_output,

@@ -157,9 +157,23 @@ def _build_cmd(model, **overrides):
         "use_rna_msa": False,
         "seed": 0,
         "device": "cuda",
+        "include_pae_matrix": False,
     }
     kwargs.update(overrides)
     return model._build_cmd(**kwargs)
+
+
+def test_opendde_need_atom_confidence_tracks_include_pae_matrix(tmp_path):
+    """--need_atom_confidence is 'true' only when the PAE matrix is requested."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+
+    off = _build_cmd(model, include_pae_matrix=False)
+    on = _build_cmd(model, include_pae_matrix=True)
+    assert off[off.index("--need_atom_confidence") + 1] == "false"
+    assert on[on.index("--need_atom_confidence") + 1] == "true"
 
 
 def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
@@ -313,6 +327,61 @@ def test_opendde_iptm_surfaced_when_present(monkeypatch):
     assert result.structures[0].metrics["iptm"] == pytest.approx(0.62)
 
 
+def test_opendde_pae_attached_when_requested(monkeypatch):
+    """include_pae_matrix=True threads the flag to the worker and attaches pae/avg_pae."""
+    captured: dict = {}
+    pae = [[0.0, 1.5], [1.5, 0.0]]
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+        "avg_pae": 0.75,
+        "pae": pae,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+
+    result = run_opendde(
+        OpenDDEInput(complexes=[_CRO_SEQUENCE]),
+        OpenDDEConfig(use_msa=False, include_pae_matrix=True),
+    )
+
+    assert captured["input_data"][0]["include_pae_matrix"] is True
+    m = result.structures[0].metrics
+    assert m["avg_pae"] == pytest.approx(0.75)
+    assert m["pae"] == pae
+    assert_metrics_in_spec(result)
+
+
+def test_opendde_pae_absent_by_default(monkeypatch):
+    """Without include_pae_matrix the worker gets False and no pae/avg_pae is attached."""
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+
+    result = run_opendde(OpenDDEInput(complexes=[_CRO_SEQUENCE]), OpenDDEConfig(use_msa=False))
+
+    assert captured["input_data"][0]["include_pae_matrix"] is False
+    m = result.structures[0].metrics
+    assert "pae" not in m
+    assert "avg_pae" not in m
+
+
 def test_opendde_one_structure_per_complex(monkeypatch):
     """Each input complex yields exactly one structure (1:1 cardinality)."""
     captured: dict = {}
@@ -359,6 +428,22 @@ def test_opendde_basic_execution():
     structure = result.structures[0]
     assert is_valid_structure(structure.structure_cif)
     assert structure.metrics["avg_plddt"] is not None
+    assert_metrics_in_spec(result)
+
+
+@pytest.mark.uses_gpu
+def test_opendde_pae_matrix_end_to_end():
+    """include_pae_matrix=True yields a square per-token PAE matrix + avg_pae in Å."""
+    result = run_opendde(
+        OpenDDEInput(complexes=[_TINY_PEPTIDE]),
+        OpenDDEConfig(use_msa=False, num_samples=1, num_steps=50, num_cycles=3, seed=42, include_pae_matrix=True),
+    )
+    assert result.success
+    m = result.structures[0].metrics
+    pae = m["pae"]
+    assert isinstance(pae, list) and len(pae) > 0
+    assert all(len(row) == len(pae) for row in pae), "PAE matrix must be square (n_token x n_token)"
+    assert 0.0 <= m["avg_pae"] <= 32.0
     assert_metrics_in_spec(result)
 
 

@@ -45,7 +45,7 @@ def _resolve_opendde_bin() -> str:
     )
 
 
-def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
+def _extract_structure_and_scores(output_dir: str, include_pae_matrix: bool = False) -> dict[str, Any]:
     """Select the best-ranked sample and extract its structure + confidence metrics.
 
     OpenDDE writes, per diffusion sample under
@@ -56,14 +56,20 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     scale, plus ``ptm``/``iptm``/``gpde``/``ranking_score``); The best
     sample is the one with the highest ``ranking_score``.
 
+    When ``include_pae_matrix`` is set, the matching ``*_full_data_sample_<rank>.json``
+    (emitted by ``--need_atom_confidence``) is read for the winning sample and its
+    token-pair PAE matrix is returned as ``pae`` (Å) with a derived scalar ``avg_pae``.
+
     Args:
         output_dir (str): Directory OpenDDE wrote predictions into.
+        include_pae_matrix (bool): Also read the per-token PAE matrix + avg_pae.
 
     Returns:
         dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
 
     Raises:
-        FileNotFoundError: If no summary/CIF outputs are found.
+        FileNotFoundError: If no summary/CIF outputs are found (or the full-data
+            file is missing when ``include_pae_matrix`` is set).
     """
     summary_paths = glob.glob(os.path.join(output_dir, "**", "*_summary_confidence_sample_*.json"), recursive=True)
     if not summary_paths:
@@ -112,6 +118,25 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
         "ranking_score": float(best_summary["ranking_score"]),
         "has_clash": bool(best_summary["has_clash"]),
     }
+
+    if include_pae_matrix:
+        # Sibling full-data file for the winning sample (written by --need_atom_confidence):
+        #   <prefix>_summary_confidence_sample_<rank>.json -> <prefix>_full_data_sample_<rank>.json
+        full_data_path = os.path.join(pred_dir, f"{match.group('prefix')}_full_data_sample_{match.group('rank')}.json")
+        if not os.path.exists(full_data_path):
+            raise FileNotFoundError(
+                f"opendde: PAE requested but full-data file not found: {full_data_path}; "
+                "the run must pass --need_atom_confidence"
+            )
+        with open(full_data_path) as f:
+            full_data = json.load(f)
+        pae = full_data.get("token_pair_pae")
+        if pae is None:
+            raise KeyError(f"opendde: 'token_pair_pae' missing from {full_data_path}")
+        import numpy as np
+
+        metrics["pae"] = pae
+        metrics["avg_pae"] = float(np.asarray(pae, dtype=float).mean())
 
     with open(cif_path) as f:
         cif_output = f.read()
@@ -177,6 +202,7 @@ class OpenDDEModel:
         use_rna_msa: bool,
         seed: int,
         device: str,
+        include_pae_matrix: bool = False,
     ) -> list[str]:
         """Build the ``opendde pred`` argv."""
         assert self.root_dir is not None  # set by load()
@@ -208,6 +234,10 @@ class OpenDDEModel:
             str(seed),
             "--device",
             device_arg,
+            # Emit per-token confidence (the full-data file with token_pair_pae) only
+            # when the caller asked for the PAE matrix — it is O(n_token^2) to write.
+            "--need_atom_confidence",
+            _bool_str(include_pae_matrix),
         ]
 
         # Explicit checkpoint override. Upstream selects the antibody-antigen
@@ -243,6 +273,7 @@ class OpenDDEModel:
         seed: int,
         device: str,
         verbose: bool = False,
+        include_pae_matrix: bool = False,
     ) -> dict[str, Any]:
         """Run OpenDDE prediction and return the best sample's structure + metrics.
 
@@ -261,6 +292,8 @@ class OpenDDEModel:
             seed (int): Random seed (``--seeds``).
             device (str): Device string (e.g. ``"cuda"``, ``"cpu"``).
             verbose (bool): Tee subprocess stdout/stderr to this process.
+            include_pae_matrix (bool): Pass ``--need_atom_confidence`` and return the
+                per-token PAE matrix (``pae``) plus a derived ``avg_pae`` scalar.
 
         Returns:
             dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
@@ -286,6 +319,7 @@ class OpenDDEModel:
             use_rna_msa=use_rna_msa,
             seed=seed,
             device=device,
+            include_pae_matrix=include_pae_matrix,
         )
 
         # Pin the subprocess to the caller-specified GPU, and make sure OpenDDE reads
@@ -310,7 +344,7 @@ class OpenDDEModel:
             raise OpenDDEExecutionError(f"opendde: prediction failed (exit {returncode}): {stderr_tail}")
 
         logger.debug("OpenDDE execution completed successfully.")
-        return _extract_structure_and_scores(output_dir)
+        return _extract_structure_and_scores(output_dir, include_pae_matrix=include_pae_matrix)
 
 
 # ============================================================================
@@ -353,6 +387,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             seed=input_dict["seed"],
             device=input_dict["device"],
             verbose=input_dict["verbose"],
+            include_pae_matrix=input_dict.get("include_pae_matrix", False),
         )
     raise ValueError(f"opendde: unknown operation {operation!r}; valid: ['predict']")
 
