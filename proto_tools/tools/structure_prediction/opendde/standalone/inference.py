@@ -160,8 +160,9 @@ class OpenDDEModel:
     def load(self) -> None:
         """Resolve ``OPENDDE_ROOT_DIR`` (checkpoints + common assets) and verify it holds weights.
 
-        Explicit ``OPENDDE_ROOT_DIR`` env var (set by the tool layer from ``config.root_dir``)
-        wins, otherwise the managed weights cache is resolved via ``resolve_weights_dir``.
+        An explicit ``OPENDDE_ROOT_DIR`` env var wins, otherwise the managed weights
+        cache is resolved via ``resolve_weights_dir`` (PROTO_OPENDDE_WEIGHTS_DIR /
+        PROTO_MODEL_CACHE / PROTO_HOME).
 
         Raises:
             FileNotFoundError: If no root can be resolved or no checkpoint is present.

@@ -9,11 +9,9 @@ Example:
     >>> print(f"pLDDT: {result.structures[0].metrics['avg_plddt']:.1f}")
 """
 
-import contextlib
 import json
 import os
 import tempfile
-from collections.abc import Iterator
 from logging import getLogger
 from typing import Any, ClassVar, Literal
 
@@ -172,10 +170,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         use_rna_msa (bool): Enable OpenDDE's RNA MSA pipeline (``--use_rna_msa``).
             Also requires the ``search_database/`` assets. Default: False.
 
-        root_dir (str | None): OpenDDE runtime/asset root (``OPENDDE_ROOT_DIR``:
-            checkpoints and common assets). If ``None``, resolves from
-            ``PROTO_OPENDDE_WEIGHTS_DIR`` / ``PROTO_MODEL_CACHE``. Default: None.
-
         load_checkpoint_path (str | None): Explicit checkpoint file override
             (``--load_checkpoint_path``); bypasses ``model_name`` resolution. Default: None.
 
@@ -236,11 +230,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         default=False,
         description="Enable OpenDDE's RNA MSA pipeline (--use_rna_msa).",
     )
-    root_dir: str | None = ConfigField(
-        title="OpenDDE Root Directory",
-        default=None,
-        description="OpenDDE runtime/asset root (OPENDDE_ROOT_DIR). If unset, resolves from env vars.",
-    )
     load_checkpoint_path: str | None = ConfigField(
         title="Checkpoint Path Override",
         default=None,
@@ -255,12 +244,7 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     )
 
     def cloud_unsupported_reason(self) -> str | None:
-        """A local ``root_dir`` / ``load_checkpoint_path`` is not present on a hosted worker."""
-        if self.root_dir:
-            return (
-                "root_dir points to a local OpenDDE asset directory not available on device='cloud'. "
-                "Unset it, or run locally with device='cuda'/'cpu'."
-            )
+        """A local ``load_checkpoint_path`` is not present on a hosted worker."""
         if self.load_checkpoint_path:
             return (
                 "load_checkpoint_path points to a local checkpoint not available on device='cloud'. "
@@ -275,35 +259,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
 def example_input() -> Any:
     """Minimal valid input for testing and examples."""
     return OpenDDEInput(complexes=["MKTL"])  # type: ignore[list-item]
-
-
-@contextlib.contextmanager
-def _config_overrides_env(root_dir: str | None) -> Iterator[None]:
-    """Mirror ``config.root_dir`` onto ``OPENDDE_ROOT_DIR`` for the dispatch, then restore.
-
-    setup.sh's asset resolution and the env_vars.txt passthrough only see env
-    vars, not the config. When a caller supplies ``root_dir`` it must take
-    precedence over the env fallback, so mirror it for the duration of the call.
-
-    Args:
-        root_dir (str | None): Config-supplied OpenDDE root. When falsy, the env
-            var is left untouched and resolution falls back to
-            ``PROTO_OPENDDE_WEIGHTS_DIR`` / ``PROTO_MODEL_CACHE`` defaults.
-    """
-    if not root_dir:
-        yield
-        return
-    key = "OPENDDE_ROOT_DIR"
-    sentinel = object()
-    original: Any = os.environ.get(key, sentinel)
-    os.environ[key] = root_dir
-    try:
-        yield
-    finally:
-        if original is sentinel:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = original
 
 
 @tool(
@@ -354,23 +309,22 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
         >>> print(f"pLDDT: {result.structures[0].metrics['avg_plddt']:.1f}")
     """
     base_seed = config.seed if config.seed is not None else config.get_random_int()
-    with _config_overrides_env(config.root_dir):
-        # Advance the seed per complex so duplicate inputs get distinct seeds.
-        results = [
-            run_opendde_on_complex(
-                config=config,
-                sp_complex=comp,
-                complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
-                instance=instance,
-                seed=base_seed + dispatch_idx,
-                dispatch_idx=dispatch_idx,
+    # Advance the seed per complex so duplicate inputs get distinct seeds.
+    results = [
+        run_opendde_on_complex(
+            config=config,
+            sp_complex=comp,
+            complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
+            instance=instance,
+            seed=base_seed + dispatch_idx,
+            dispatch_idx=dispatch_idx,
+        )
+        for dispatch_idx, comp in enumerate(
+            progress_bar(
+                inputs.complexes, desc="Folding structures (OpenDDE)", unit="complex", total=len(inputs.complexes)
             )
-            for dispatch_idx, comp in enumerate(
-                progress_bar(
-                    inputs.complexes, desc="Folding structures (OpenDDE)", unit="complex", total=len(inputs.complexes)
-                )
-            )
-        ]
+        )
+    ]
     return OpenDDEOutput(
         structures=results,
         metadata={

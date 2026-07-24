@@ -294,9 +294,8 @@ def test_opendde_explicit_checkpoint_path_wins_over_model_name(tmp_path):
 
 
 def test_opendde_cloud_unsupported_reason():
-    """A local root_dir or load_checkpoint_path yields a reason; otherwise None."""
+    """A local load_checkpoint_path yields a reason; otherwise None."""
     assert OpenDDEConfig(use_msa=False).cloud_unsupported_reason() is None
-    assert OpenDDEConfig(use_msa=False, root_dir="/local/assets").cloud_unsupported_reason() is not None
     assert OpenDDEConfig(use_msa=False, load_checkpoint_path="/local/ckpt.pt").cloud_unsupported_reason() is not None
 
 

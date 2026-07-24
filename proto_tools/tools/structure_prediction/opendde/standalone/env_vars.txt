@@ -10,8 +10,8 @@
 # PROTO_MODEL_CACHE are forwarded automatically by persistent_worker.py.
 
 [passthrough]
-# OpenDDE runtime/asset root (checkpoints + common assets). Set by the tool layer
-# from config.root_dir; otherwise inference.py resolves the managed weights cache.
+# OpenDDE runtime/asset root (checkpoints + common assets). Optional advanced
+# override; when unset inference.py resolves the managed weights cache.
 OPENDDE_ROOT_DIR
 # Per-tool weights override (point at an external OpenDDE asset directory).
 PROTO_OPENDDE_WEIGHTS_DIR
