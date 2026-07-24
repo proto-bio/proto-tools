@@ -17,8 +17,6 @@ from collections.abc import Iterator
 from logging import getLogger
 from typing import Any, ClassVar, Literal
 
-from pydantic import model_validator
-
 from proto_tools.entities.structures import BFactorType, Structure
 from proto_tools.tools.structure_prediction.opendde.helpers import (
     build_chain_msa_paths,
@@ -174,9 +172,8 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         msa_search_config (Mmseqs2HomologySearchConfig | None): MMseqs2 search config;
             only used when ``use_msa=True``. Inherited. Default: None.
 
-        include_pae_matrix (bool): Inherited. **Must remain False** — OpenDDE emits
-            no PAE at all (neither a per-token matrix nor an ``avg_pae`` scalar), so a
-            ``True`` value is rejected rather than silently ignored. Default: False.
+        include_pae_matrix (bool): Inherited; ignored by OpenDDE, which emits no
+            per-token PAE matrix. Default: False.
 
         device (str): Device to run on (``"cuda"``, ``"cpu"``). Inherited. Default: ``"cuda"``.
 
@@ -252,16 +249,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
                 "Unset it, or run locally with device='cuda'/'cpu'."
             )
         return None
-
-    @model_validator(mode="after")
-    def reject_pae_matrix(self) -> "OpenDDEConfig":
-        """OpenDDE emits no PAE; reject any non-default ``include_pae_matrix``."""
-        if self.include_pae_matrix:
-            raise ValueError(
-                "'include_pae_matrix' is not supported by OpenDDE - upstream emits only scalar "
-                "confidences (avg_plddt, ptm, iptm, gpde, ranking_score), never a PAE matrix or avg_pae."
-            )
-        return self
 
 
 # ============================================================================

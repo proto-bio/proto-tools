@@ -223,14 +223,6 @@ def test_opendde_cloud_unsupported_reason():
     assert OpenDDEConfig(use_msa=False, load_checkpoint_path="/local/ckpt.pt").cloud_unsupported_reason() is not None
 
 
-def test_opendde_config_rejects_include_pae_matrix():
-    """OpenDDE emits no PAE at all; the inherited toggle must be rejected, not ignored."""
-    with pytest.raises(ValueError, match="include_pae_matrix"):
-        OpenDDEConfig(use_msa=False, include_pae_matrix=True)
-    # The default (False) still constructs.
-    assert OpenDDEConfig(use_msa=False).include_pae_matrix is False
-
-
 # ── Dispatch / metric assembly (mocked worker) ───────────────────────────────
 
 
