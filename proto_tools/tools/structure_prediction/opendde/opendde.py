@@ -151,8 +151,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     Inherits from ``MSAStructurePredictionConfig``.
 
     Attributes:
-        name (str): Name of the folding job; drives the output path. Default: ``"opendde_job"``.
-
         model_checkpoint (str): Which weights to fold with — a bundled model name
             (``"opendde_v1"`` general-purpose or ``"opendde_abag"`` antibody-antigen,
             both auto-downloaded into ``PROTO_MODEL_CACHE`` on first inference) or a
@@ -194,11 +192,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         timeout (int | None): Max execution time in seconds; ``None`` waits indefinitely. Default: 1200.
     """
 
-    name: str = ConfigField(
-        title="OpenDDE Job Name",
-        default="opendde_job",
-        description="Name of the OpenDDE folding job; drives the output path.",
-    )
     model_checkpoint: str = ConfigField(
         title="Model / Checkpoint",
         default="opendde_v1",
@@ -356,7 +349,8 @@ def run_opendde_on_complex(
     if config.verbose:
         logger.info("Using local GPU for OpenDDE structure prediction...")
 
-    job_name = f"{config.name}_{dispatch_idx}"
+    # Internal label for OpenDDE's ephemeral output files (temp dir is discarded; results returned via Output).
+    job_name = f"opendde_{dispatch_idx}"
     with tempfile.TemporaryDirectory() as temp_dir:
         output_dir = os.path.join(temp_dir, "opendde_output")
         os.makedirs(output_dir)
