@@ -12,6 +12,12 @@ from standalone_helpers import get_logger
 
 logger = get_logger(__name__)
 
+# Bundled model name -> checkpoint file under OPENDDE_ROOT_DIR (auto-downloaded by setup.sh); None = default weights.
+_BUNDLED_CHECKPOINTS: dict[str, str | None] = {
+    "opendde_v1": None,
+    "opendde_abag": "checkpoint/opendde_abag.pt",
+}
+
 
 class OpenDDEExecutionError(Exception):
     """Raised when the ``opendde pred`` CLI fails for a non-OOM reason."""
@@ -45,7 +51,7 @@ def _resolve_opendde_bin() -> str:
     )
 
 
-def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
+def _extract_structure_and_scores(output_dir: str, include_pae_matrix: bool = False) -> dict[str, Any]:
     """Select the best-ranked sample and extract its structure + confidence metrics.
 
     OpenDDE writes, per diffusion sample under
@@ -56,14 +62,20 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
     scale, plus ``ptm``/``iptm``/``gpde``/``ranking_score``); The best
     sample is the one with the highest ``ranking_score``.
 
+    When ``include_pae_matrix`` is set, the matching ``*_full_data_sample_<rank>.json``
+    (emitted by ``--need_atom_confidence``) is read for the winning sample and its
+    token-pair PAE matrix is returned as ``pae`` (Å) with a derived scalar ``avg_pae``.
+
     Args:
         output_dir (str): Directory OpenDDE wrote predictions into.
+        include_pae_matrix (bool): Also read the per-token PAE matrix + avg_pae.
 
     Returns:
         dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
 
     Raises:
-        FileNotFoundError: If no summary/CIF outputs are found.
+        FileNotFoundError: If no summary/CIF outputs are found (or the full-data
+            file is missing when ``include_pae_matrix`` is set).
     """
     summary_paths = glob.glob(os.path.join(output_dir, "**", "*_summary_confidence_sample_*.json"), recursive=True)
     if not summary_paths:
@@ -113,6 +125,24 @@ def _extract_structure_and_scores(output_dir: str) -> dict[str, Any]:
         "has_clash": bool(best_summary["has_clash"]),
     }
 
+    if include_pae_matrix:
+        # Sibling full-data file for the winning sample (written by --need_atom_confidence).
+        full_data_path = os.path.join(pred_dir, f"{match.group('prefix')}_full_data_sample_{match.group('rank')}.json")
+        if not os.path.exists(full_data_path):
+            raise FileNotFoundError(
+                f"opendde: PAE requested but full-data file not found: {full_data_path}; "
+                "the run must pass --need_atom_confidence"
+            )
+        with open(full_data_path) as f:
+            full_data = json.load(f)
+        pae = full_data.get("token_pair_pae")
+        if pae is None:
+            raise KeyError(f"opendde: 'token_pair_pae' missing from {full_data_path}")
+        import numpy as np
+
+        metrics["pae"] = pae
+        metrics["avg_pae"] = float(np.asarray(pae, dtype=float).mean())
+
     with open(cif_path) as f:
         cif_output = f.read()
 
@@ -135,8 +165,9 @@ class OpenDDEModel:
     def load(self) -> None:
         """Resolve ``OPENDDE_ROOT_DIR`` (checkpoints + common assets) and verify it holds weights.
 
-        Explicit ``OPENDDE_ROOT_DIR`` env var (set by the tool layer from ``config.root_dir``)
-        wins, otherwise the managed weights cache is resolved via ``resolve_weights_dir``.
+        An explicit ``OPENDDE_ROOT_DIR`` env var wins, otherwise the managed weights
+        cache is resolved via ``resolve_weights_dir`` (PROTO_OPENDDE_WEIGHTS_DIR /
+        PROTO_MODEL_CACHE / PROTO_HOME).
 
         Raises:
             FileNotFoundError: If no root can be resolved or no checkpoint is present.
@@ -167,8 +198,7 @@ class OpenDDEModel:
         input_json_path: str,
         output_dir: str,
         job_name: str,  # noqa: ARG002 -- OpenDDE derives the job name from the input JSON
-        model_name: str,
-        load_checkpoint_path: str | None,
+        model_checkpoint: str,
         num_samples: int,
         num_steps: int,
         num_cycles: int,
@@ -177,6 +207,7 @@ class OpenDDEModel:
         use_rna_msa: bool,
         seed: int,
         device: str,
+        include_pae_matrix: bool = False,
     ) -> list[str]:
         """Build the ``opendde pred`` argv."""
         assert self.root_dir is not None  # set by load()
@@ -208,20 +239,25 @@ class OpenDDEModel:
             str(seed),
             "--device",
             device_arg,
+            # Emit the full-data PAE file only when requested (it is O(n_token^2) to write).
+            "--need_atom_confidence",
+            _bool_str(include_pae_matrix),
         ]
 
-        # Explicit checkpoint override. Upstream selects the antibody-antigen
-        # checkpoint via --load_checkpoint_path rather than -n, so when the caller
-        # requests opendde_abag without an explicit path, derive it from the
-        # provisioned OPENDDE_ROOT_DIR/checkpoint/ layout.
-        resolved_ckpt = load_checkpoint_path
-        if resolved_ckpt is None and model_name == "opendde_abag":
-            resolved_ckpt = os.path.join(self.root_dir, "checkpoint", "opendde_abag.pt")
-            if not os.path.exists(resolved_ckpt):
-                raise FileNotFoundError(
-                    f"opendde: antibody-antigen checkpoint not found at {resolved_ckpt}; re-run setup.sh to "
-                    "download weights, or set load_checkpoint_path to an explicit checkpoint file"
-                )
+        # Bundled name -> file under root (opendde_v1 -> None = default weights); anything else is an explicit path.
+        if model_checkpoint in _BUNDLED_CHECKPOINTS:
+            rel = _BUNDLED_CHECKPOINTS[model_checkpoint]
+            resolved_ckpt = os.path.join(self.root_dir, rel) if rel else None
+        else:
+            resolved_ckpt = model_checkpoint
+
+        if resolved_ckpt and not os.path.exists(resolved_ckpt):
+            known = ", ".join(sorted(_BUNDLED_CHECKPOINTS))
+            raise FileNotFoundError(
+                f"opendde: checkpoint not found at {resolved_ckpt!r} (model_checkpoint={model_checkpoint!r}); "
+                f"use a bundled model name ({known}) and re-run setup.sh to fetch weights, "
+                "or pass a path to an existing .pt checkpoint"
+            )
         if resolved_ckpt:
             cmd += ["--load_checkpoint_path", resolved_ckpt]
 
@@ -232,8 +268,7 @@ class OpenDDEModel:
         input_json_path: str,
         output_dir: str,
         job_name: str,
-        model_name: str,
-        load_checkpoint_path: str | None,
+        model_checkpoint: str,
         num_samples: int,
         num_steps: int,
         num_cycles: int,
@@ -243,6 +278,7 @@ class OpenDDEModel:
         seed: int,
         device: str,
         verbose: bool = False,
+        include_pae_matrix: bool = False,
     ) -> dict[str, Any]:
         """Run OpenDDE prediction and return the best sample's structure + metrics.
 
@@ -250,8 +286,8 @@ class OpenDDEModel:
             input_json_path (str): Path to the OpenDDE input JSON (MSAs already populated).
             output_dir (str): Directory for OpenDDE output files.
             job_name (str): Folding job name (drives OpenDDE's output subdirectory).
-            model_name (str): Checkpoint identifier (``-n``), e.g. ``opendde_v1``/``opendde_abag``.
-            load_checkpoint_path (str | None): Explicit checkpoint override (``--load_checkpoint_path``).
+            model_checkpoint (str): Bundled model name (``opendde_v1``/``opendde_abag``) or
+                a path to a custom ``.pt`` checkpoint.
             num_samples (int): Independent diffusion samples (``--sample``).
             num_steps (int): Diffusion denoising steps (``--step``).
             num_cycles (int): Recycling iterations (``--cycle``).
@@ -261,6 +297,8 @@ class OpenDDEModel:
             seed (int): Random seed (``--seeds``).
             device (str): Device string (e.g. ``"cuda"``, ``"cpu"``).
             verbose (bool): Tee subprocess stdout/stderr to this process.
+            include_pae_matrix (bool): Pass ``--need_atom_confidence`` and return the
+                per-token PAE matrix (``pae``) plus a derived ``avg_pae`` scalar.
 
         Returns:
             dict[str, Any]: ``{"structure_cif_output": <cif str>, "metrics": {...}}``.
@@ -276,8 +314,7 @@ class OpenDDEModel:
             input_json_path=input_json_path,
             output_dir=output_dir,
             job_name=job_name,
-            model_name=model_name,
-            load_checkpoint_path=load_checkpoint_path,
+            model_checkpoint=model_checkpoint,
             num_samples=num_samples,
             num_steps=num_steps,
             num_cycles=num_cycles,
@@ -286,6 +323,7 @@ class OpenDDEModel:
             use_rna_msa=use_rna_msa,
             seed=seed,
             device=device,
+            include_pae_matrix=include_pae_matrix,
         )
 
         # Pin the subprocess to the caller-specified GPU, and make sure OpenDDE reads
@@ -310,7 +348,7 @@ class OpenDDEModel:
             raise OpenDDEExecutionError(f"opendde: prediction failed (exit {returncode}): {stderr_tail}")
 
         logger.debug("OpenDDE execution completed successfully.")
-        return _extract_structure_and_scores(output_dir)
+        return _extract_structure_and_scores(output_dir, include_pae_matrix=include_pae_matrix)
 
 
 # ============================================================================
@@ -342,8 +380,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             input_json_path=input_dict["input_json_path"],
             output_dir=input_dict["output_dir"],
             job_name=input_dict["job_name"],
-            model_name=input_dict["model_name"],
-            load_checkpoint_path=input_dict.get("load_checkpoint_path"),
+            model_checkpoint=input_dict["model_checkpoint"],
             num_samples=input_dict["num_samples"],
             num_steps=input_dict["num_steps"],
             num_cycles=input_dict["num_cycles"],
@@ -353,6 +390,7 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
             seed=input_dict["seed"],
             device=input_dict["device"],
             verbose=input_dict["verbose"],
+            include_pae_matrix=input_dict.get("include_pae_matrix", False),
         )
     raise ValueError(f"opendde: unknown operation {operation!r}; valid: ['predict']")
 

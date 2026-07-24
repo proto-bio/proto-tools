@@ -16,6 +16,7 @@ from proto_tools.tools.structure_prediction.shared_data_models import (
     ComplexMSAs,
     resolve_chain_ids,
     unwrap_complex_msas,
+    write_paired_a3m_with_uniprot_headers,
 )
 
 logger = getLogger(__name__)
@@ -31,13 +32,21 @@ def build_chain_msa_paths(
     complex_msas: "ComplexMSAs | None",
     temp_dir: str,
     verbose: int = 0,
-) -> dict[str, str]:
-    """Map each protein chain ID to a per-sequence A3M file for OpenDDE ``unpairedMsaPath``.
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Write per-chain A3M files for OpenDDE's ``unpairedMsaPath`` and ``pairedMsaPath``.
 
-    OpenDDE takes one A3M path per chain (``unpairedMsaPath``) and builds the MSA
-    features itself, so identical sequences share a single file. Only unpaired
-    depth is written; OpenDDE block-diagonalizes it across the complex. Chains
-    without homologs are omitted and fall back to single-sequence mode.
+    OpenDDE takes one A3M path per protein chain for each of two roles and builds the
+    MSA features itself:
+
+    - ``unpairedMsaPath``: per-chain depth, block-diagonalized across the complex.
+      Identical sequences share a single file.
+    - ``pairedMsaPath``: taxonomy-paired rows for heterocomplexes. When the supplied
+      MSAs are paired (``is_paired``), the primary per-chain MSA is row-aligned by
+      species, so it is written with UniProt-style headers via
+      ``write_paired_a3m_with_uniprot_headers`` — OpenDDE's ``_UNIPROT_REGEX`` then
+      extracts a per-row species id and ``MSAPairingEngine.pair_chains_by_species``
+      engages cross-chain pairing (same AF3/Protenix lineage). Single-sequence
+      chains are omitted and fall back to single-sequence mode.
 
     Args:
         sp_complex (Complex): Complex whose protein chains are being aligned.
@@ -46,12 +55,15 @@ def build_chain_msa_paths(
         verbose (int): Verbosity level (truthy = log per-chain assignment).
 
     Returns:
-        dict[str, str]: Chain ID → A3M file path for each protein chain with an MSA.
+        tuple[dict[str, str], dict[str, str]]: ``(unpaired_paths, paired_paths)`` —
+            each maps a protein chain ID to its A3M file path. ``paired_paths`` is
+            empty unless the supplied MSAs are paired.
     """
-    per_chain_msas, unpaired_per_chain, _is_paired = unwrap_complex_msas(complex_msas)
-    chain_msa_paths: dict[str, str] = {}
+    per_chain_msas, unpaired_per_chain, is_paired = unwrap_complex_msas(complex_msas)
+    unpaired_paths: dict[str, str] = {}
+    paired_paths: dict[str, str] = {}
     if not per_chain_msas:
-        return chain_msa_paths
+        return unpaired_paths, paired_paths
 
     msa_dir = os.path.join(temp_dir, "msas")
     os.makedirs(msa_dir, exist_ok=True)
@@ -60,21 +72,34 @@ def build_chain_msa_paths(
     for ch_idx, chain in enumerate(sp_complex.chains):
         if not (isinstance(chain, Chain) and chain.entity_type == "protein"):
             continue
-        # Prefer the deep unpaired MSA for depth; fall back to the primary (paired) set.
-        msa: MSA | None = (unpaired_per_chain or {}).get(ch_idx) or per_chain_msas.get(ch_idx)
-        if msa is None:
-            continue
         chain_id = chain_ids[ch_idx]
-        seq = chain.sequence
-        a3m_path = seq_to_a3m.get(seq)
-        if a3m_path is None:
-            a3m_path = os.path.join(msa_dir, f"chain_{chain_id}_{ch_idx}.a3m")
-            msa.to_a3m_file(a3m_path, query_index=0)
-            seq_to_a3m[seq] = a3m_path
-        chain_msa_paths[chain_id] = a3m_path
-        if verbose:
-            logger.info(f"Assigned MSA to chain {chain_id} ({len(msa)} sequences)")
-    return chain_msa_paths
+
+        # Unpaired depth: prefer the deep unpaired MSA, fall back to the primary set.
+        unpaired_msa: MSA | None = (unpaired_per_chain or {}).get(ch_idx) or per_chain_msas.get(ch_idx)
+        if unpaired_msa is not None:
+            seq = chain.sequence
+            a3m_path = seq_to_a3m.get(seq)
+            if a3m_path is None:
+                a3m_path = os.path.join(msa_dir, f"chain_{chain_id}_{ch_idx}.a3m")
+                unpaired_msa.to_a3m_file(a3m_path, query_index=0)
+                seq_to_a3m[seq] = a3m_path
+            unpaired_paths[chain_id] = a3m_path
+
+        # Paired set is taxonomy-aligned by row; emit it with pairing-engaging UniProt headers.
+        if is_paired:
+            paired_msa = per_chain_msas.get(ch_idx)
+            if paired_msa is not None:
+                paired_path = os.path.join(msa_dir, f"chain_{chain_id}_{ch_idx}.paired.a3m")
+                write_paired_a3m_with_uniprot_headers(paired_msa, paired_path)
+                paired_paths[chain_id] = paired_path
+
+        if verbose and (chain_id in unpaired_paths or chain_id in paired_paths):
+            logger.info(
+                f"Assigned MSA to chain {chain_id} "
+                f"(unpaired={'yes' if chain_id in unpaired_paths else 'no'}, "
+                f"paired={'yes' if chain_id in paired_paths else 'no'})"
+            )
+    return unpaired_paths, paired_paths
 
 
 def complex_to_opendde_json(
@@ -82,6 +107,7 @@ def complex_to_opendde_json(
     name: str,
     seeds: list[int],
     chain_msa_paths: dict[str, str] | None = None,
+    chain_paired_msa_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Convert a complex's chains to a single OpenDDE inference JSON job dict.
 
@@ -97,13 +123,17 @@ def complex_to_opendde_json(
         chains (list[Chain | Fragment]): Biopolymer chains and/or ligand fragments.
         name (str): Job name; drives OpenDDE's output path (``<out>/<name>/...``).
         seeds (list[int]): OpenDDE ``modelSeeds`` for this job.
-        chain_msa_paths (dict[str, str] | None): Chain ID → A3M path for protein
-            chains. Chains absent from the map fold single-sequence.
+        chain_msa_paths (dict[str, str] | None): Chain ID → unpaired A3M path for
+            protein chains. Chains absent from the map fold single-sequence.
+        chain_paired_msa_paths (dict[str, str] | None): Chain ID → paired A3M path
+            (taxonomy-aligned) for heterocomplex pairing. Chains absent from the map
+            get no ``pairedMsaPath``.
 
     Returns:
         dict[str, Any]: One OpenDDE job object (wrap in a list before writing).
     """
     chain_msa_paths = chain_msa_paths or {}
+    chain_paired_msa_paths = chain_paired_msa_paths or {}
     chain_ids = resolve_chain_ids(chains)
     sequences: list[dict[str, Any]] = []
 
@@ -147,6 +177,8 @@ def complex_to_opendde_json(
 
         if chain.entity_type == "protein" and chain_id in chain_msa_paths:
             entry["unpairedMsaPath"] = chain_msa_paths[chain_id]
+        if chain.entity_type == "protein" and chain_id in chain_paired_msa_paths:
+            entry["pairedMsaPath"] = chain_paired_msa_paths[chain_id]
 
         sequences.append({entity_key: entry})
 

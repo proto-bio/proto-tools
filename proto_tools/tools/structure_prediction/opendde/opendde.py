@@ -9,13 +9,11 @@ Example:
     >>> print(f"pLDDT: {result.structures[0].metrics['avg_plddt']:.1f}")
 """
 
-import contextlib
 import json
 import os
 import tempfile
-from collections.abc import Iterator
 from logging import getLogger
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
 from proto_tools.entities.structures import BFactorType, Structure
 from proto_tools.tools.structure_prediction.opendde.helpers import (
@@ -36,6 +34,9 @@ from proto_tools.utils.progress import progress_bar
 from proto_tools.utils.tool_io import Metrics, MetricSpec
 
 logger = getLogger(__name__)
+
+# Bundled model names auto-downloaded by setup.sh; other model_checkpoint values are user paths.
+_BUNDLED_MODELS: frozenset[str] = frozenset({"opendde_v1", "opendde_abag"})
 
 
 # ============================================================================
@@ -81,6 +82,8 @@ class OpenDDEMetrics(Metrics):
         gpde (float): Global predicted distance error (lower is better). Always present.
         ranking_score (float): OpenDDE ranking score used to select the best sample. Always present.
         has_clash (bool): Whether the predicted structure has a steric clash. Always present.
+        avg_pae (float): Mean of the per-token PAE matrix in Å. Present when include_pae_matrix=True.
+        pae (list[list[float]]): Full per-token PAE matrix in Å. Present when include_pae_matrix=True.
     """
 
     metric_spec: ClassVar[dict[str, MetricSpec]] = {
@@ -106,6 +109,20 @@ class OpenDDEMetrics(Metrics):
             "type": "bool",
             "min": None,
             "max": None,
+            "better_values_are": "lower",
+        },
+        "avg_pae": {
+            "availability": "when include_pae_matrix=True",
+            "type": "float",
+            "min": 0.0,
+            "max": 32.0,
+            "better_values_are": "lower",
+        },
+        "pae": {
+            "availability": "when include_pae_matrix=True",
+            "type": "list[list[float]]",
+            "min": 0.0,
+            "max": 32.0,
             "better_values_are": "lower",
         },
     }
@@ -136,8 +153,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     Attributes:
         name (str): Name of the folding job; drives the output path. Default: ``"opendde_job"``.
 
-        model_name (Literal["opendde_v1", "opendde_abag"]): OpenDDE checkpoint to use
-            (``-n``). ``opendde_abag`` is antibody-antigen tuned. Default: ``"opendde_v1"``.
+        model_checkpoint (str): Which weights to fold with — a bundled model name
+            (``"opendde_v1"`` general-purpose or ``"opendde_abag"`` antibody-antigen,
+            both auto-downloaded into ``PROTO_MODEL_CACHE`` on first inference) or a
+            path to a custom ``.pt`` checkpoint. Default: ``"opendde_v1"``.
 
         num_samples (int): Independent diffusion samples per complex (``--sample``);
             the best by ranking score is returned. Default: 1.
@@ -156,13 +175,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         use_rna_msa (bool): Enable OpenDDE's RNA MSA pipeline (``--use_rna_msa``).
             Also requires the ``search_database/`` assets. Default: False.
 
-        root_dir (str | None): OpenDDE runtime/asset root (``OPENDDE_ROOT_DIR``:
-            checkpoints and common assets). If ``None``, resolves from
-            ``PROTO_OPENDDE_WEIGHTS_DIR`` / ``PROTO_MODEL_CACHE``. Default: None.
-
-        load_checkpoint_path (str | None): Explicit checkpoint file override
-            (``--load_checkpoint_path``); bypasses ``model_name`` resolution. Default: None.
-
         use_msa (bool): Auto-generate protein MSAs via MMseqs2 homology search;
             supplied MSAs always override this. Inherited. Default: True.
 
@@ -172,8 +184,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         msa_search_config (Mmseqs2HomologySearchConfig | None): MMseqs2 search config;
             only used when ``use_msa=True``. Inherited. Default: None.
 
-        include_pae_matrix (bool): Inherited; ignored by OpenDDE, which emits no
-            per-token PAE matrix. Default: False.
+        include_pae_matrix (bool): Inherited. When True, OpenDDE is run with
+            ``--need_atom_confidence`` and the per-token PAE matrix (``pae``) plus a
+            derived ``avg_pae`` scalar are attached to the metrics. Off by default —
+            the matrix is O(n_token^2) to compute and serialize. Default: False.
 
         device (str): Device to run on (``"cuda"``, ``"cpu"``). Inherited. Default: ``"cuda"``.
 
@@ -185,10 +199,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         default="opendde_job",
         description="Name of the OpenDDE folding job; drives the output path.",
     )
-    model_name: Literal["opendde_v1", "opendde_abag"] = ConfigField(
-        title="OpenDDE Model Name",
+    model_checkpoint: str = ConfigField(
+        title="Model / Checkpoint",
         default="opendde_v1",
-        description="OpenDDE checkpoint (-n): 'opendde_v1' general-purpose or 'opendde_abag' antibody-antigen tuned.",
+        description="Bundled model name ('opendde_v1' or 'opendde_abag') or a path to a custom .pt checkpoint.",
     )
     num_samples: int = ConfigField(
         title="Number of Samples",
@@ -218,16 +232,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         default=False,
         description="Enable OpenDDE's RNA MSA pipeline (--use_rna_msa).",
     )
-    root_dir: str | None = ConfigField(
-        title="OpenDDE Root Directory",
-        default=None,
-        description="OpenDDE runtime/asset root (OPENDDE_ROOT_DIR). If unset, resolves from env vars.",
-    )
-    load_checkpoint_path: str | None = ConfigField(
-        title="Checkpoint Path Override",
-        default=None,
-        description="Explicit checkpoint file (--load_checkpoint_path); bypasses model_name resolution.",
-    )
     timeout: int | None = ConfigField(
         title="Timeout",
         default=1200,
@@ -237,16 +241,12 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     )
 
     def cloud_unsupported_reason(self) -> str | None:
-        """A local ``root_dir`` / ``load_checkpoint_path`` is not present on a hosted worker."""
-        if self.root_dir:
+        """A custom ``model_checkpoint`` path is not present on a hosted worker (bundled names are)."""
+        if self.model_checkpoint not in _BUNDLED_MODELS:
             return (
-                "root_dir points to a local OpenDDE asset directory not available on device='cloud'. "
-                "Unset it, or run locally with device='cuda'/'cpu'."
-            )
-        if self.load_checkpoint_path:
-            return (
-                "load_checkpoint_path points to a local checkpoint not available on device='cloud'. "
-                "Unset it, or run locally with device='cuda'/'cpu'."
+                "model_checkpoint points to a local checkpoint file not available on device='cloud'. "
+                f"Use a bundled model name ({', '.join(sorted(_BUNDLED_MODELS))}), or run locally with "
+                "device='cuda'/'cpu'."
             )
         return None
 
@@ -257,35 +257,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
 def example_input() -> Any:
     """Minimal valid input for testing and examples."""
     return OpenDDEInput(complexes=["MKTL"])  # type: ignore[list-item]
-
-
-@contextlib.contextmanager
-def _config_overrides_env(root_dir: str | None) -> Iterator[None]:
-    """Mirror ``config.root_dir`` onto ``OPENDDE_ROOT_DIR`` for the dispatch, then restore.
-
-    setup.sh's asset resolution and the env_vars.txt passthrough only see env
-    vars, not the config. When a caller supplies ``root_dir`` it must take
-    precedence over the env fallback, so mirror it for the duration of the call.
-
-    Args:
-        root_dir (str | None): Config-supplied OpenDDE root. When falsy, the env
-            var is left untouched and resolution falls back to
-            ``PROTO_OPENDDE_WEIGHTS_DIR`` / ``PROTO_MODEL_CACHE`` defaults.
-    """
-    if not root_dir:
-        yield
-        return
-    key = "OPENDDE_ROOT_DIR"
-    sentinel = object()
-    original: Any = os.environ.get(key, sentinel)
-    os.environ[key] = root_dir
-    try:
-        yield
-    finally:
-        if original is sentinel:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = original
 
 
 @tool(
@@ -336,23 +307,22 @@ def run_opendde(inputs: OpenDDEInput, config: OpenDDEConfig, instance: Any = Non
         >>> print(f"pLDDT: {result.structures[0].metrics['avg_plddt']:.1f}")
     """
     base_seed = config.seed if config.seed is not None else config.get_random_int()
-    with _config_overrides_env(config.root_dir):
-        # Advance the seed per complex so duplicate inputs get distinct seeds.
-        results = [
-            run_opendde_on_complex(
-                config=config,
-                sp_complex=comp,
-                complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
-                instance=instance,
-                seed=base_seed + dispatch_idx,
-                dispatch_idx=dispatch_idx,
+    # Advance the seed per complex so duplicate inputs get distinct seeds.
+    results = [
+        run_opendde_on_complex(
+            config=config,
+            sp_complex=comp,
+            complex_msas=inputs.msas[dispatch_idx] if inputs.msas else None,
+            instance=instance,
+            seed=base_seed + dispatch_idx,
+            dispatch_idx=dispatch_idx,
+        )
+        for dispatch_idx, comp in enumerate(
+            progress_bar(
+                inputs.complexes, desc="Folding structures (OpenDDE)", unit="complex", total=len(inputs.complexes)
             )
-            for dispatch_idx, comp in enumerate(
-                progress_bar(
-                    inputs.complexes, desc="Folding structures (OpenDDE)", unit="complex", total=len(inputs.complexes)
-                )
-            )
-        ]
+        )
+    ]
     return OpenDDEOutput(
         structures=results,
         metadata={
@@ -391,36 +361,41 @@ def run_opendde_on_complex(
         output_dir = os.path.join(temp_dir, "opendde_output")
         os.makedirs(output_dir)
 
-        # Honor MSAs whenever present: auto-generated when use_msa=True, or supplied
-        # by the caller (always respected regardless of use_msa). With neither, the
-        # complex folds single-sequence. OpenDDE consumes them via unpairedMsaPath.
-        chain_msa_paths = build_chain_msa_paths(sp_complex, complex_msas, temp_dir, verbose=config.verbose)
-        input_json = complex_to_opendde_json(sp_complex.chains, job_name, [seed], chain_msa_paths=chain_msa_paths)
+        # Use supplied/auto-generated MSAs when present (unpaired + paired MsaPath); else single-sequence.
+        chain_msa_paths, chain_paired_msa_paths = build_chain_msa_paths(
+            sp_complex, complex_msas, temp_dir, verbose=config.verbose
+        )
+        input_json = complex_to_opendde_json(
+            sp_complex.chains,
+            job_name,
+            [seed],
+            chain_msa_paths=chain_msa_paths,
+            chain_paired_msa_paths=chain_paired_msa_paths,
+        )
 
         input_json_path = os.path.join(temp_dir, f"{job_name}.json")
         with open(input_json_path, "w") as f:
             json.dump([input_json], f, indent=2)
 
-        # OpenDDE runs its own MSA search only when no A3M paths are supplied and
-        # the caller asked for it; supplied paths always take precedence.
-        run_internal_msa = config.use_msa and not chain_msa_paths
+        # --use_msa must be true whenever MSAs exist; OpenDDE skips its featurizer (ignoring supplied paths) when false.
+        opendde_use_msa = bool(chain_msa_paths or chain_paired_msa_paths) or config.use_msa
 
         input_data = {
             "operation": "predict",
             "input_json_path": input_json_path,
             "output_dir": output_dir,
             "job_name": job_name,
-            "model_name": config.model_name,
-            "load_checkpoint_path": config.load_checkpoint_path,
+            "model_checkpoint": config.model_checkpoint,
             "num_samples": config.num_samples,
             "num_steps": config.num_steps,
             "num_cycles": config.num_cycles,
-            "use_msa": run_internal_msa,
+            "use_msa": opendde_use_msa,
             "use_template": config.use_template,
             "use_rna_msa": config.use_rna_msa,
             "seed": seed,
             "device": config.device,
             "verbose": config.verbose,
+            "include_pae_matrix": config.include_pae_matrix,
         }
 
         output_data = ToolInstance.dispatch("opendde", input_data, instance=instance, config=config)
@@ -436,6 +411,10 @@ def run_opendde_on_complex(
         "ranking_score": float(formatted_metrics["ranking_score"]),
         "has_clash": bool(formatted_metrics["has_clash"]),
     }
+    # PAE is only present when include_pae_matrix requested it (--need_atom_confidence).
+    if "pae" in formatted_metrics:
+        metrics_dict["avg_pae"] = float(formatted_metrics["avg_pae"])
+        metrics_dict["pae"] = formatted_metrics["pae"]
 
     structure = Structure(
         structure=cif_output,

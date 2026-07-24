@@ -5,6 +5,7 @@ Tests for OpenDDE all-atom structure prediction (``opendde-prediction``).
 
 import importlib.util
 import logging
+import re
 import sys
 import types
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from proto_tools.entities.ligands import Fragment
+from proto_tools.entities.msa import MSA
 from proto_tools.entities.structures import is_valid_structure
 from proto_tools.tools import (
     Chain,
@@ -19,7 +21,8 @@ from proto_tools.tools import (
     OpenDDEInput,
     run_opendde,
 )
-from proto_tools.tools.structure_prediction.opendde.helpers import complex_to_opendde_json
+from proto_tools.tools.structure_prediction import Complex, ComplexMSAs
+from proto_tools.tools.structure_prediction.opendde.helpers import build_chain_msa_paths, complex_to_opendde_json
 from tests._structure_fixtures import synthetic_cif
 from tests.conftest import benchmark_twice
 from tests.structure_prediction_tests._fasta_helpers import load_benchmark_complex
@@ -30,6 +33,11 @@ from tests.tool_infra_tests.test_export_functionality import validate_export_out
 _CRO_SEQUENCE = "MQTQNNSREKQAAALERLFLSCFLKDPVPKPLQEGTCDDVLCRELLNESETHLVQSIFRKESKVPGA"
 # A short, foldable peptide for GPU smoke tests.
 _TINY_PEPTIDE = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
+
+# OpenDDE pairs paired rows by a species id from the header (_UNIPROT_REGEX); our paired A3M must match it.
+_OPENDDE_UNIPROT_REGEX = re.compile(
+    r"(?:tr|sp)\|[A-Z0-9]{6,10}(?:_\d+)?\|(?:[A-Z0-9]{1,10}_)(?P<SpeciesId>[A-Z0-9]{1,5})"
+)
 
 
 # ── OpenDDE JSON shape: entity mapping ───────────────────────────────────────
@@ -98,6 +106,60 @@ def test_opendde_chain_msa_paths_set_unpaired_msa_path_on_protein():
     assert job["sequences"][0]["proteinChain"]["unpairedMsaPath"] == "/scratch/chain_A.a3m"
 
 
+def test_opendde_json_emits_paired_msa_path():
+    """A supplied chain_paired_msa_paths entry populates ``pairedMsaPath`` alongside the unpaired one."""
+    chains = [Chain(sequence="MVLSPADKTN", entity_type="protein")]
+    job = complex_to_opendde_json(
+        chains,
+        "j",
+        [0],
+        chain_msa_paths={"A": "/scratch/chain_A.a3m"},
+        chain_paired_msa_paths={"A": "/scratch/chain_A.paired.a3m"},
+    )
+    entry = job["sequences"][0]["proteinChain"]
+    assert entry["unpairedMsaPath"] == "/scratch/chain_A.a3m"
+    assert entry["pairedMsaPath"] == "/scratch/chain_A.paired.a3m"
+
+
+def test_opendde_build_chain_msa_paths_emits_species_paired_headers(tmp_path):
+    """For paired MSAs, a pairedMsaPath is written whose headers OpenDDE's species regex pairs by row."""
+    query_a, query_b = "MKTAYIAKQR", "GSHMEELLSK"
+    cx = Complex(
+        chains=[
+            Chain(id="A", sequence=query_a, entity_type="protein"),
+            Chain(id="B", sequence=query_b, entity_type="protein"),
+        ]
+    )
+    # Paired set: row i of A and row i of B are the same species (taxonomy-aligned).
+    paired = {
+        0: MSA(aligned_sequences=[query_a, "MKTAYIAKQA", "MKTAYIAKQE"]),
+        1: MSA(aligned_sequences=[query_b, "GSHMEELLSA", "GSHMEELLSE"]),
+    }
+    complex_msas = ComplexMSAs(per_chain=paired, paired=True)
+
+    unpaired_paths, paired_paths = build_chain_msa_paths(cx, complex_msas, str(tmp_path))
+
+    # Both chains get an unpaired AND a paired A3M.
+    assert set(unpaired_paths) == {"A", "B"}
+    assert set(paired_paths) == {"A", "B"}
+
+    def _species_by_row(a3m_path):
+        headers = [ln[1:] for ln in Path(a3m_path).read_text().splitlines() if ln.startswith(">")]
+        # Row 0 is the inert query; non-query rows must match OpenDDE's UniProt regex.
+        ids = []
+        for h in headers[1:]:
+            m = _OPENDDE_UNIPROT_REGEX.match(h)
+            assert m is not None, f"header {h!r} does not match OpenDDE's species regex"
+            ids.append(m.group("SpeciesId"))
+        return ids
+
+    species_a = _species_by_row(paired_paths["A"])
+    species_b = _species_by_row(paired_paths["B"])
+    # Same species token at each row index across chains -> OpenDDE pairs those rows.
+    assert species_a == species_b
+    assert len(set(species_a)) == len(species_a)  # distinct per row (row-index encoded)
+
+
 def test_opendde_protein_modifications_prefixed_ptm():
     """Protein PTMs serialize as CCD_-prefixed ptmType / ptmPosition."""
     chains = [Chain(sequence="MVLSPADKTN", entity_type="protein", modifications=[(4, "SEP")])]
@@ -147,8 +209,7 @@ def _build_cmd(model, **overrides):
         "input_json_path": "input.json",
         "output_dir": "output",
         "job_name": "job",
-        "model_name": "opendde_v1",
-        "load_checkpoint_path": None,
+        "model_checkpoint": "opendde_v1",
         "num_samples": 1,
         "num_steps": 200,
         "num_cycles": 10,
@@ -157,13 +218,27 @@ def _build_cmd(model, **overrides):
         "use_rna_msa": False,
         "seed": 0,
         "device": "cuda",
+        "include_pae_matrix": False,
     }
     kwargs.update(overrides)
     return model._build_cmd(**kwargs)
 
 
-def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
-    """Upstream's ``-n`` accepts only ``opendde_v1``; ``opendde_abag`` routes via checkpoint path."""
+def test_opendde_need_atom_confidence_tracks_include_pae_matrix(tmp_path):
+    """--need_atom_confidence is 'true' only when the PAE matrix is requested."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+
+    off = _build_cmd(model, include_pae_matrix=False)
+    on = _build_cmd(model, include_pae_matrix=True)
+    assert off[off.index("--need_atom_confidence") + 1] == "false"
+    assert on[on.index("--need_atom_confidence") + 1] == "true"
+
+
+def test_opendde_bundled_abag_routes_via_checkpoint_path(tmp_path):
+    """The ``opendde_abag`` name routes to its bundled checkpoint via --load_checkpoint_path (-n stays opendde_v1)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
@@ -172,55 +247,78 @@ def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
     ckpt_dir.mkdir()
     (ckpt_dir / "opendde_abag.pt").write_bytes(b"")
 
-    cmd = _build_cmd(model, model_name="opendde_abag")
+    cmd = _build_cmd(model, model_checkpoint="opendde_abag")
 
     assert cmd[cmd.index("-n") + 1] == "opendde_v1"
-    assert "opendde_abag" not in cmd[cmd.index("-n") + 1]
     assert cmd[cmd.index("--load_checkpoint_path") + 1] == str(ckpt_dir / "opendde_abag.pt")
 
 
 def test_opendde_default_model_sends_no_checkpoint_override(tmp_path):
-    """``opendde_v1`` lets OpenDDE load its own default weights."""
+    """``opendde_v1`` lets OpenDDE load its own default weights (no --load_checkpoint_path)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
 
-    assert "--load_checkpoint_path" not in _build_cmd(model, model_name="opendde_v1")
+    assert "--load_checkpoint_path" not in _build_cmd(model, model_checkpoint="opendde_v1")
 
 
-def test_opendde_missing_abag_checkpoint_fails_before_dispatch(tmp_path):
-    """A derived abag path that does not exist must fail here, not inside the CLI subprocess."""
+def test_opendde_missing_bundled_checkpoint_fails_before_dispatch(tmp_path):
+    """A bundled checkpoint that hasn't been downloaded fails here, not inside the CLI."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
     (tmp_path / "checkpoint").mkdir()
 
-    with pytest.raises(FileNotFoundError, match="antibody-antigen checkpoint not found"):
-        _build_cmd(model, model_name="opendde_abag")
+    with pytest.raises(FileNotFoundError, match="checkpoint not found"):
+        _build_cmd(model, model_checkpoint="opendde_abag")
 
 
-def test_opendde_explicit_checkpoint_path_wins_over_model_name(tmp_path):
-    """An explicit ``load_checkpoint_path`` is passed through untouched and skips derivation."""
+def test_opendde_explicit_checkpoint_path_is_passed_through(tmp_path):
+    """A model_checkpoint that isn't a bundled name is used as an explicit path."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+    custom = tmp_path / "custom.pt"
+    custom.write_bytes(b"")
+
+    cmd = _build_cmd(model, model_checkpoint=str(custom))
+
+    assert cmd[cmd.index("--load_checkpoint_path") + 1] == str(custom)
+
+
+def test_opendde_unknown_checkpoint_value_raises(tmp_path):
+    """A value that is neither a bundled name nor an existing path fails clearly (typo guard)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
 
-    cmd = _build_cmd(model, model_name="opendde_abag", load_checkpoint_path="/custom/ckpt.pt")
+    with pytest.raises(FileNotFoundError, match="checkpoint not found"):
+        _build_cmd(model, model_checkpoint="opendde_v2")
 
-    assert cmd[cmd.index("--load_checkpoint_path") + 1] == "/custom/ckpt.pt"
+
+def test_opendde_bundled_checkpoints_are_downloaded_by_setup():
+    """Every bundled checkpoint the resolver can select must be fetched by setup.sh."""
+    mod = _load_standalone_inference()
+    standalone_dir = Path(mod.__file__).resolve().parent
+    setup = (standalone_dir / "setup.sh").read_text()
+    assert "opendde.pt" in setup  # opendde_v1 default weights
+    for rel in mod._BUNDLED_CHECKPOINTS.values():
+        if rel:
+            assert Path(rel).name in setup, f"setup.sh does not download bundled checkpoint {rel}"
 
 
 # ── Config: cloud support gate ───────────────────────────────────────────────
 
 
 def test_opendde_cloud_unsupported_reason():
-    """A local root_dir or load_checkpoint_path yields a reason; otherwise None."""
+    """A bundled model name is cloud-OK; a custom checkpoint path is not."""
     assert OpenDDEConfig(use_msa=False).cloud_unsupported_reason() is None
-    assert OpenDDEConfig(use_msa=False, root_dir="/local/assets").cloud_unsupported_reason() is not None
-    assert OpenDDEConfig(use_msa=False, load_checkpoint_path="/local/ckpt.pt").cloud_unsupported_reason() is not None
+    assert OpenDDEConfig(use_msa=False, model_checkpoint="opendde_abag").cloud_unsupported_reason() is None
+    assert OpenDDEConfig(use_msa=False, model_checkpoint="/local/ckpt.pt").cloud_unsupported_reason() is not None
 
 
 # ── Dispatch / metric assembly (mocked worker) ───────────────────────────────
@@ -260,7 +358,7 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
             num_samples=2,
             num_steps=33,
             num_cycles=4,
-            model_name="opendde_abag",
+            model_checkpoint="opendde_abag",
         ),
     )
 
@@ -289,7 +387,7 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
     assert input_data["num_samples"] == 2
     assert input_data["num_steps"] == 33
     assert input_data["num_cycles"] == 4
-    assert input_data["model_name"] == "opendde_abag"
+    assert input_data["model_checkpoint"] == "opendde_abag"
 
 
 def test_opendde_iptm_surfaced_when_present(monkeypatch):
@@ -311,6 +409,115 @@ def test_opendde_iptm_surfaced_when_present(monkeypatch):
     result = run_opendde(OpenDDEInput(complexes=[_CRO_SEQUENCE]), OpenDDEConfig(use_msa=False))
 
     assert result.structures[0].metrics["iptm"] == pytest.approx(0.62)
+
+
+def test_opendde_pae_attached_when_requested(monkeypatch):
+    """include_pae_matrix=True threads the flag to the worker and attaches pae/avg_pae."""
+    captured: dict = {}
+    pae = [[0.0, 1.5], [1.5, 0.0]]
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+        "avg_pae": 0.75,
+        "pae": pae,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+
+    result = run_opendde(
+        OpenDDEInput(complexes=[_CRO_SEQUENCE]),
+        OpenDDEConfig(use_msa=False, include_pae_matrix=True),
+    )
+
+    assert captured["input_data"][0]["include_pae_matrix"] is True
+    m = result.structures[0].metrics
+    assert m["avg_pae"] == pytest.approx(0.75)
+    assert m["pae"] == pae
+    assert_metrics_in_spec(result)
+
+
+def test_opendde_pae_absent_by_default(monkeypatch):
+    """Without include_pae_matrix the worker gets False and no pae/avg_pae is attached."""
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+
+    result = run_opendde(OpenDDEInput(complexes=[_CRO_SEQUENCE]), OpenDDEConfig(use_msa=False))
+
+    assert captured["input_data"][0]["include_pae_matrix"] is False
+    m = result.structures[0].metrics
+    assert "pae" not in m
+    assert "avg_pae" not in m
+
+
+def test_opendde_supplied_msas_force_use_msa_true(monkeypatch, tmp_path):
+    """Supplied MSAs must set OpenDDE --use_msa=true; otherwise its featurizer ignores them.
+
+    OpenDDE's infer_dataloader skips MSA featurization entirely when use_msa is false,
+    so passing false with supplied paths silently folds single-sequence.
+    """
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.5,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+    seq_a, seq_b = "MKTAYIAKQR", "GSHMEELLSK"
+    cx = Complex(
+        chains=[
+            Chain(id="A", sequence=seq_a, entity_type="protein"),
+            Chain(id="B", sequence=seq_b, entity_type="protein"),
+        ]
+    )
+    cx_msas = ComplexMSAs(
+        per_chain={0: MSA(aligned_sequences=[seq_a, seq_a]), 1: MSA(aligned_sequences=[seq_b, seq_b])}
+    )
+
+    # use_msa=False on the config, but MSAs are supplied → OpenDDE must still load them.
+    run_opendde(OpenDDEInput(complexes=[cx], msas=[cx_msas]), OpenDDEConfig(use_msa=False))
+    assert captured["input_data"][0]["use_msa"] is True
+
+
+def test_opendde_no_msa_single_sequence_sets_use_msa_false(monkeypatch):
+    """No supplied MSAs and use_msa=False → OpenDDE folds single-sequence (--use_msa false)."""
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+    run_opendde(OpenDDEInput(complexes=[_CRO_SEQUENCE]), OpenDDEConfig(use_msa=False))
+    assert captured["input_data"][0]["use_msa"] is False
 
 
 def test_opendde_one_structure_per_complex(monkeypatch):
@@ -359,6 +566,22 @@ def test_opendde_basic_execution():
     structure = result.structures[0]
     assert is_valid_structure(structure.structure_cif)
     assert structure.metrics["avg_plddt"] is not None
+    assert_metrics_in_spec(result)
+
+
+@pytest.mark.uses_gpu
+def test_opendde_pae_matrix_end_to_end():
+    """include_pae_matrix=True yields a square per-token PAE matrix + avg_pae in Å."""
+    result = run_opendde(
+        OpenDDEInput(complexes=[_TINY_PEPTIDE]),
+        OpenDDEConfig(use_msa=False, num_samples=1, num_steps=50, num_cycles=3, seed=42, include_pae_matrix=True),
+    )
+    assert result.success
+    m = result.structures[0].metrics
+    pae = m["pae"]
+    assert isinstance(pae, list) and len(pae) > 0
+    assert all(len(row) == len(pae) for row in pae), "PAE matrix must be square (n_token x n_token)"
+    assert 0.0 <= m["avg_pae"] <= 32.0
     assert_metrics_in_spec(result)
 
 
