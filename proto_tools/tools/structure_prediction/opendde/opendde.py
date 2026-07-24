@@ -411,17 +411,31 @@ def run_opendde_on_complex(
 
         # Honor MSAs whenever present: auto-generated when use_msa=True, or supplied
         # by the caller (always respected regardless of use_msa). With neither, the
-        # complex folds single-sequence. OpenDDE consumes them via unpairedMsaPath.
-        chain_msa_paths = build_chain_msa_paths(sp_complex, complex_msas, temp_dir, verbose=config.verbose)
-        input_json = complex_to_opendde_json(sp_complex.chains, job_name, [seed], chain_msa_paths=chain_msa_paths)
+        # complex folds single-sequence. OpenDDE consumes them via unpairedMsaPath and,
+        # for taxonomy-paired heterocomplex MSAs, pairedMsaPath.
+        chain_msa_paths, chain_paired_msa_paths = build_chain_msa_paths(
+            sp_complex, complex_msas, temp_dir, verbose=config.verbose
+        )
+        input_json = complex_to_opendde_json(
+            sp_complex.chains,
+            job_name,
+            [seed],
+            chain_msa_paths=chain_msa_paths,
+            chain_paired_msa_paths=chain_paired_msa_paths,
+        )
 
         input_json_path = os.path.join(temp_dir, f"{job_name}.json")
         with open(input_json_path, "w") as f:
             json.dump([input_json], f, indent=2)
 
-        # OpenDDE runs its own MSA search only when no A3M paths are supplied and
-        # the caller asked for it; supplied paths always take precedence.
-        run_internal_msa = config.use_msa and not chain_msa_paths
+        # OpenDDE's --use_msa gates whether it builds MSA features *at all*: when
+        # false, infer_dataloader skips the MSA featurizer entirely and folds
+        # single-sequence, ignoring any supplied unpaired/pairedMsaPath. So it must
+        # be true whenever there are MSAs to load — supplied A3M paths OR an internal
+        # search. With supplied paths OpenDDE loads them and skips its own search
+        # (need_msa_search is false when the paths exist); with no paths and
+        # config.use_msa it runs the internal search; otherwise it folds single-seq.
+        opendde_use_msa = bool(chain_msa_paths or chain_paired_msa_paths) or config.use_msa
 
         input_data = {
             "operation": "predict",
@@ -433,7 +447,7 @@ def run_opendde_on_complex(
             "num_samples": config.num_samples,
             "num_steps": config.num_steps,
             "num_cycles": config.num_cycles,
-            "use_msa": run_internal_msa,
+            "use_msa": opendde_use_msa,
             "use_template": config.use_template,
             "use_rna_msa": config.use_rna_msa,
             "seed": seed,

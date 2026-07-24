@@ -5,6 +5,7 @@ Tests for OpenDDE all-atom structure prediction (``opendde-prediction``).
 
 import importlib.util
 import logging
+import re
 import sys
 import types
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from proto_tools.entities.ligands import Fragment
+from proto_tools.entities.msa import MSA
 from proto_tools.entities.structures import is_valid_structure
 from proto_tools.tools import (
     Chain,
@@ -19,7 +21,8 @@ from proto_tools.tools import (
     OpenDDEInput,
     run_opendde,
 )
-from proto_tools.tools.structure_prediction.opendde.helpers import complex_to_opendde_json
+from proto_tools.tools.structure_prediction import Complex, ComplexMSAs
+from proto_tools.tools.structure_prediction.opendde.helpers import build_chain_msa_paths, complex_to_opendde_json
 from tests._structure_fixtures import synthetic_cif
 from tests.conftest import benchmark_twice
 from tests.structure_prediction_tests._fasta_helpers import load_benchmark_complex
@@ -30,6 +33,12 @@ from tests.tool_infra_tests.test_export_functionality import validate_export_out
 _CRO_SEQUENCE = "MQTQNNSREKQAAALERLFLSCFLKDPVPKPLQEGTCDDVLCRELLNESETHLVQSIFRKESKVPGA"
 # A short, foldable peptide for GPU smoke tests.
 _TINY_PEPTIDE = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
+
+# OpenDDE pairs paired-MSA rows by a species id extracted from the header with this
+# regex (opendde/data/msa/msa_utils.py::_UNIPROT_REGEX); the paired A3M we emit must match it.
+_OPENDDE_UNIPROT_REGEX = re.compile(
+    r"(?:tr|sp)\|[A-Z0-9]{6,10}(?:_\d+)?\|(?:[A-Z0-9]{1,10}_)(?P<SpeciesId>[A-Z0-9]{1,5})"
+)
 
 
 # ── OpenDDE JSON shape: entity mapping ───────────────────────────────────────
@@ -96,6 +105,60 @@ def test_opendde_chain_msa_paths_set_unpaired_msa_path_on_protein():
     job = complex_to_opendde_json(chains, "j", [0], chain_msa_paths={"A": "/scratch/chain_A.a3m"})
 
     assert job["sequences"][0]["proteinChain"]["unpairedMsaPath"] == "/scratch/chain_A.a3m"
+
+
+def test_opendde_json_emits_paired_msa_path():
+    """A supplied chain_paired_msa_paths entry populates ``pairedMsaPath`` alongside the unpaired one."""
+    chains = [Chain(sequence="MVLSPADKTN", entity_type="protein")]
+    job = complex_to_opendde_json(
+        chains,
+        "j",
+        [0],
+        chain_msa_paths={"A": "/scratch/chain_A.a3m"},
+        chain_paired_msa_paths={"A": "/scratch/chain_A.paired.a3m"},
+    )
+    entry = job["sequences"][0]["proteinChain"]
+    assert entry["unpairedMsaPath"] == "/scratch/chain_A.a3m"
+    assert entry["pairedMsaPath"] == "/scratch/chain_A.paired.a3m"
+
+
+def test_opendde_build_chain_msa_paths_emits_species_paired_headers(tmp_path):
+    """For paired MSAs, a pairedMsaPath is written whose headers OpenDDE's species regex pairs by row."""
+    query_a, query_b = "MKTAYIAKQR", "GSHMEELLSK"
+    cx = Complex(
+        chains=[
+            Chain(id="A", sequence=query_a, entity_type="protein"),
+            Chain(id="B", sequence=query_b, entity_type="protein"),
+        ]
+    )
+    # Paired set: row i of A and row i of B are the same species (taxonomy-aligned).
+    paired = {
+        0: MSA(aligned_sequences=[query_a, "MKTAYIAKQA", "MKTAYIAKQE"]),
+        1: MSA(aligned_sequences=[query_b, "GSHMEELLSA", "GSHMEELLSE"]),
+    }
+    complex_msas = ComplexMSAs(per_chain=paired, paired=True)
+
+    unpaired_paths, paired_paths = build_chain_msa_paths(cx, complex_msas, str(tmp_path))
+
+    # Both chains get an unpaired AND a paired A3M.
+    assert set(unpaired_paths) == {"A", "B"}
+    assert set(paired_paths) == {"A", "B"}
+
+    def _species_by_row(a3m_path):
+        headers = [ln[1:] for ln in Path(a3m_path).read_text().splitlines() if ln.startswith(">")]
+        # Row 0 is the inert query; non-query rows must match OpenDDE's UniProt regex.
+        ids = []
+        for h in headers[1:]:
+            m = _OPENDDE_UNIPROT_REGEX.match(h)
+            assert m is not None, f"header {h!r} does not match OpenDDE's species regex"
+            ids.append(m.group("SpeciesId"))
+        return ids
+
+    species_a = _species_by_row(paired_paths["A"])
+    species_b = _species_by_row(paired_paths["B"])
+    # Same species token at each row index across chains -> OpenDDE pairs those rows.
+    assert species_a == species_b
+    assert len(set(species_a)) == len(species_a)  # distinct per row (row-index encoded)
 
 
 def test_opendde_protein_modifications_prefixed_ptm():
@@ -380,6 +443,60 @@ def test_opendde_pae_absent_by_default(monkeypatch):
     m = result.structures[0].metrics
     assert "pae" not in m
     assert "avg_pae" not in m
+
+
+def test_opendde_supplied_msas_force_use_msa_true(monkeypatch, tmp_path):
+    """Supplied MSAs must set OpenDDE --use_msa=true; otherwise its featurizer ignores them.
+
+    OpenDDE's infer_dataloader skips MSA featurization entirely when use_msa is false,
+    so passing false with supplied paths silently folds single-sequence.
+    """
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.5,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+    seq_a, seq_b = "MKTAYIAKQR", "GSHMEELLSK"
+    cx = Complex(
+        chains=[
+            Chain(id="A", sequence=seq_a, entity_type="protein"),
+            Chain(id="B", sequence=seq_b, entity_type="protein"),
+        ]
+    )
+    cx_msas = ComplexMSAs(
+        per_chain={0: MSA(aligned_sequences=[seq_a, seq_a]), 1: MSA(aligned_sequences=[seq_b, seq_b])}
+    )
+
+    # use_msa=False on the config, but MSAs are supplied → OpenDDE must still load them.
+    run_opendde(OpenDDEInput(complexes=[cx], msas=[cx_msas]), OpenDDEConfig(use_msa=False))
+    assert captured["input_data"][0]["use_msa"] is True
+
+
+def test_opendde_no_msa_single_sequence_sets_use_msa_false(monkeypatch):
+    """No supplied MSAs and use_msa=False → OpenDDE folds single-sequence (--use_msa false)."""
+    captured: dict = {}
+    metrics = {
+        "avg_plddt": 90.0,
+        "ptm": 0.8,
+        "iptm": 0.0,
+        "gpde": 1.0,
+        "ranking_score": 0.7,
+        "has_clash": False,
+    }
+    monkeypatch.setattr(
+        "proto_tools.tools.structure_prediction.opendde.opendde.ToolInstance.dispatch",
+        _fake_dispatch_factory(captured, metrics=metrics),
+    )
+    run_opendde(OpenDDEInput(complexes=[_CRO_SEQUENCE]), OpenDDEConfig(use_msa=False))
+    assert captured["input_data"][0]["use_msa"] is False
 
 
 def test_opendde_one_structure_per_complex(monkeypatch):
