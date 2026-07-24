@@ -85,8 +85,7 @@ def build_chain_msa_paths(
                 seq_to_a3m[seq] = a3m_path
             unpaired_paths[chain_id] = a3m_path
 
-        # Paired depth: the primary per-chain MSA is taxonomy-aligned by row when the
-        # supplied MSAs are paired; emit it with pairing-engaging UniProt headers.
+        # Paired set is taxonomy-aligned by row; emit it with pairing-engaging UniProt headers.
         if is_paired:
             paired_msa = per_chain_msas.get(ch_idx)
             if paired_msa is not None:

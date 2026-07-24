@@ -13,7 +13,7 @@ import json
 import os
 import tempfile
 from logging import getLogger
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
 from proto_tools.entities.structures import BFactorType, Structure
 from proto_tools.tools.structure_prediction.opendde.helpers import (
@@ -34,6 +34,9 @@ from proto_tools.utils.progress import progress_bar
 from proto_tools.utils.tool_io import Metrics, MetricSpec
 
 logger = getLogger(__name__)
+
+# Bundled model names auto-downloaded by setup.sh; other model_checkpoint values are user paths.
+_BUNDLED_MODELS: frozenset[str] = frozenset({"opendde_v1", "opendde_abag"})
 
 
 # ============================================================================
@@ -150,8 +153,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     Attributes:
         name (str): Name of the folding job; drives the output path. Default: ``"opendde_job"``.
 
-        model_name (Literal["opendde_v1", "opendde_abag"]): OpenDDE checkpoint to use
-            (``-n``). ``opendde_abag`` is antibody-antigen tuned. Default: ``"opendde_v1"``.
+        model_checkpoint (str): Which weights to fold with — a bundled model name
+            (``"opendde_v1"`` general-purpose or ``"opendde_abag"`` antibody-antigen,
+            both auto-downloaded into ``PROTO_MODEL_CACHE`` on first inference) or a
+            path to a custom ``.pt`` checkpoint. Default: ``"opendde_v1"``.
 
         num_samples (int): Independent diffusion samples per complex (``--sample``);
             the best by ranking score is returned. Default: 1.
@@ -169,9 +174,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
 
         use_rna_msa (bool): Enable OpenDDE's RNA MSA pipeline (``--use_rna_msa``).
             Also requires the ``search_database/`` assets. Default: False.
-
-        load_checkpoint_path (str | None): Explicit checkpoint file override
-            (``--load_checkpoint_path``); bypasses ``model_name`` resolution. Default: None.
 
         use_msa (bool): Auto-generate protein MSAs via MMseqs2 homology search;
             supplied MSAs always override this. Inherited. Default: True.
@@ -197,10 +199,10 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         default="opendde_job",
         description="Name of the OpenDDE folding job; drives the output path.",
     )
-    model_name: Literal["opendde_v1", "opendde_abag"] = ConfigField(
-        title="OpenDDE Model Name",
+    model_checkpoint: str = ConfigField(
+        title="Model / Checkpoint",
         default="opendde_v1",
-        description="OpenDDE checkpoint (-n): 'opendde_v1' general-purpose or 'opendde_abag' antibody-antigen tuned.",
+        description="Bundled model name ('opendde_v1' or 'opendde_abag') or a path to a custom .pt checkpoint.",
     )
     num_samples: int = ConfigField(
         title="Number of Samples",
@@ -230,11 +232,6 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
         default=False,
         description="Enable OpenDDE's RNA MSA pipeline (--use_rna_msa).",
     )
-    load_checkpoint_path: str | None = ConfigField(
-        title="Checkpoint Path Override",
-        default=None,
-        description="Explicit checkpoint file (--load_checkpoint_path); bypasses model_name resolution.",
-    )
     timeout: int | None = ConfigField(
         title="Timeout",
         default=1200,
@@ -244,11 +241,12 @@ class OpenDDEConfig(MSAStructurePredictionConfig):
     )
 
     def cloud_unsupported_reason(self) -> str | None:
-        """A local ``load_checkpoint_path`` is not present on a hosted worker."""
-        if self.load_checkpoint_path:
+        """A custom ``model_checkpoint`` path is not present on a hosted worker (bundled names are)."""
+        if self.model_checkpoint not in _BUNDLED_MODELS:
             return (
-                "load_checkpoint_path points to a local checkpoint not available on device='cloud'. "
-                "Unset it, or run locally with device='cuda'/'cpu'."
+                "model_checkpoint points to a local checkpoint file not available on device='cloud'. "
+                f"Use a bundled model name ({', '.join(sorted(_BUNDLED_MODELS))}), or run locally with "
+                "device='cuda'/'cpu'."
             )
         return None
 
@@ -363,10 +361,7 @@ def run_opendde_on_complex(
         output_dir = os.path.join(temp_dir, "opendde_output")
         os.makedirs(output_dir)
 
-        # Honor MSAs whenever present: auto-generated when use_msa=True, or supplied
-        # by the caller (always respected regardless of use_msa). With neither, the
-        # complex folds single-sequence. OpenDDE consumes them via unpairedMsaPath and,
-        # for taxonomy-paired heterocomplex MSAs, pairedMsaPath.
+        # Use supplied/auto-generated MSAs when present (unpaired + paired MsaPath); else single-sequence.
         chain_msa_paths, chain_paired_msa_paths = build_chain_msa_paths(
             sp_complex, complex_msas, temp_dir, verbose=config.verbose
         )
@@ -382,13 +377,7 @@ def run_opendde_on_complex(
         with open(input_json_path, "w") as f:
             json.dump([input_json], f, indent=2)
 
-        # OpenDDE's --use_msa gates whether it builds MSA features *at all*: when
-        # false, infer_dataloader skips the MSA featurizer entirely and folds
-        # single-sequence, ignoring any supplied unpaired/pairedMsaPath. So it must
-        # be true whenever there are MSAs to load — supplied A3M paths OR an internal
-        # search. With supplied paths OpenDDE loads them and skips its own search
-        # (need_msa_search is false when the paths exist); with no paths and
-        # config.use_msa it runs the internal search; otherwise it folds single-seq.
+        # --use_msa must be true whenever MSAs exist; OpenDDE skips its featurizer (ignoring supplied paths) when false.
         opendde_use_msa = bool(chain_msa_paths or chain_paired_msa_paths) or config.use_msa
 
         input_data = {
@@ -396,8 +385,7 @@ def run_opendde_on_complex(
             "input_json_path": input_json_path,
             "output_dir": output_dir,
             "job_name": job_name,
-            "model_name": config.model_name,
-            "load_checkpoint_path": config.load_checkpoint_path,
+            "model_checkpoint": config.model_checkpoint,
             "num_samples": config.num_samples,
             "num_steps": config.num_steps,
             "num_cycles": config.num_cycles,

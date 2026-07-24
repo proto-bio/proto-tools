@@ -35,7 +35,7 @@ This tool predicts the structure of multi-component assemblies such as protein-D
 
 #### Usage Tips
 
-- **`model_name` selects the checkpoint.** `opendde_v1` (default) is the general-purpose co-folding model; `opendde_abag` is tuned for antibody-antigen complexes and is the better choice for that task. Set `load_checkpoint_path` to point at an explicit checkpoint file and bypass `model_name` resolution entirely.
+- **`model_checkpoint` selects the weights.** Pass a bundled model name — `opendde_v1` (default, general-purpose) or `opendde_abag` (antibody-antigen tuned) — both auto-downloaded into `PROTO_MODEL_CACHE` on first inference; or pass a path to a custom `.pt` checkpoint to fold with your own weights.
 - **`use_msa` defaults to `True`.** An MMseqs2 homology search generates an MSA for each protein chain; set it `False` to fold single-sequence, or attach precomputed MSAs to the input, which always take precedence. OpenDDE's own internal MSA search runs only when `use_msa=True` and no MSAs are supplied.
 - **`num_samples` draws independent diffusion samples.** OpenDDE draws `num_samples` (default `1`) structures per complex and keeps the best by ranking score, so raising it explores more candidate conformations at proportional cost. Predictions are stochastic; set `seed` for reproducibility.
 - **`num_steps` and `num_cycles` trade accuracy for time.** `num_steps` (default `200`) sets the number of diffusion denoising steps and `num_cycles` (default `10`) sets the recycling iterations; higher values refine the prediction but increase runtime.

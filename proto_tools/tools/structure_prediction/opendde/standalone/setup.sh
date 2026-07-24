@@ -43,15 +43,7 @@ mkdir -p "$CKPT_DIR"
 
 HF_REPO="aurekaresearch/OpenDDE"
 
-# Fetch checkpoints and the runtime `common/` assets (residue constants, CCD, etc.)
-# from HuggingFace via huggingface_hub — an opendde dependency, installed defensively
-# so this step never relies on transitive resolution. hf_hub verifies size/etag and
-# resumes partial downloads, so re-running setup.sh is idempotent without manual
-# "already present" guards, and it drops the assumption that `curl` is on PATH in the
-# build environment. The repo is public/Apache-2.0, so HF_TOKEN is optional (only
-# lifts rate limits); huggingface_hub reads it from the environment automatically.
-# Checkpoints live at the HF repo root but OpenDDE expects them under checkpoint/, so
-# they are pulled into CKPT_DIR while common/ keeps its prefix under WEIGHTS_DIR.
+# Fetch checkpoints (into CKPT_DIR) + common/ assets via huggingface_hub — idempotent, resumable, no curl needed.
 echo "Downloading OpenDDE checkpoints and common assets..."
 uv pip install "huggingface_hub"
 python - <<PY

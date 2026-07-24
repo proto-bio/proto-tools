@@ -34,8 +34,7 @@ _CRO_SEQUENCE = "MQTQNNSREKQAAALERLFLSCFLKDPVPKPLQEGTCDDVLCRELLNESETHLVQSIFRKESK
 # A short, foldable peptide for GPU smoke tests.
 _TINY_PEPTIDE = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 
-# OpenDDE pairs paired-MSA rows by a species id extracted from the header with this
-# regex (opendde/data/msa/msa_utils.py::_UNIPROT_REGEX); the paired A3M we emit must match it.
+# OpenDDE pairs paired rows by a species id from the header (_UNIPROT_REGEX); our paired A3M must match it.
 _OPENDDE_UNIPROT_REGEX = re.compile(
     r"(?:tr|sp)\|[A-Z0-9]{6,10}(?:_\d+)?\|(?:[A-Z0-9]{1,10}_)(?P<SpeciesId>[A-Z0-9]{1,5})"
 )
@@ -210,8 +209,7 @@ def _build_cmd(model, **overrides):
         "input_json_path": "input.json",
         "output_dir": "output",
         "job_name": "job",
-        "model_name": "opendde_v1",
-        "load_checkpoint_path": None,
+        "model_checkpoint": "opendde_v1",
         "num_samples": 1,
         "num_steps": 200,
         "num_cycles": 10,
@@ -239,8 +237,8 @@ def test_opendde_need_atom_confidence_tracks_include_pae_matrix(tmp_path):
     assert on[on.index("--need_atom_confidence") + 1] == "true"
 
 
-def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
-    """Upstream's ``-n`` accepts only ``opendde_v1``; ``opendde_abag`` routes via checkpoint path."""
+def test_opendde_bundled_abag_routes_via_checkpoint_path(tmp_path):
+    """The ``opendde_abag`` name routes to its bundled checkpoint via --load_checkpoint_path (-n stays opendde_v1)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
@@ -249,54 +247,78 @@ def test_opendde_model_name_never_reaches_the_n_flag(tmp_path):
     ckpt_dir.mkdir()
     (ckpt_dir / "opendde_abag.pt").write_bytes(b"")
 
-    cmd = _build_cmd(model, model_name="opendde_abag")
+    cmd = _build_cmd(model, model_checkpoint="opendde_abag")
 
     assert cmd[cmd.index("-n") + 1] == "opendde_v1"
-    assert "opendde_abag" not in cmd[cmd.index("-n") + 1]
     assert cmd[cmd.index("--load_checkpoint_path") + 1] == str(ckpt_dir / "opendde_abag.pt")
 
 
 def test_opendde_default_model_sends_no_checkpoint_override(tmp_path):
-    """``opendde_v1`` lets OpenDDE load its own default weights."""
+    """``opendde_v1`` lets OpenDDE load its own default weights (no --load_checkpoint_path)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
 
-    assert "--load_checkpoint_path" not in _build_cmd(model, model_name="opendde_v1")
+    assert "--load_checkpoint_path" not in _build_cmd(model, model_checkpoint="opendde_v1")
 
 
-def test_opendde_missing_abag_checkpoint_fails_before_dispatch(tmp_path):
-    """A derived abag path that does not exist must fail here, not inside the CLI subprocess."""
+def test_opendde_missing_bundled_checkpoint_fails_before_dispatch(tmp_path):
+    """A bundled checkpoint that hasn't been downloaded fails here, not inside the CLI."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
     (tmp_path / "checkpoint").mkdir()
 
-    with pytest.raises(FileNotFoundError, match="antibody-antigen checkpoint not found"):
-        _build_cmd(model, model_name="opendde_abag")
+    with pytest.raises(FileNotFoundError, match="checkpoint not found"):
+        _build_cmd(model, model_checkpoint="opendde_abag")
 
 
-def test_opendde_explicit_checkpoint_path_wins_over_model_name(tmp_path):
-    """An explicit ``load_checkpoint_path`` is passed through untouched and skips derivation."""
+def test_opendde_explicit_checkpoint_path_is_passed_through(tmp_path):
+    """A model_checkpoint that isn't a bundled name is used as an explicit path."""
+    mod = _load_standalone_inference()
+    model = mod.OpenDDEModel()
+    model.root_dir = str(tmp_path)
+    model._loaded = True
+    custom = tmp_path / "custom.pt"
+    custom.write_bytes(b"")
+
+    cmd = _build_cmd(model, model_checkpoint=str(custom))
+
+    assert cmd[cmd.index("--load_checkpoint_path") + 1] == str(custom)
+
+
+def test_opendde_unknown_checkpoint_value_raises(tmp_path):
+    """A value that is neither a bundled name nor an existing path fails clearly (typo guard)."""
     mod = _load_standalone_inference()
     model = mod.OpenDDEModel()
     model.root_dir = str(tmp_path)
     model._loaded = True
 
-    cmd = _build_cmd(model, model_name="opendde_abag", load_checkpoint_path="/custom/ckpt.pt")
+    with pytest.raises(FileNotFoundError, match="checkpoint not found"):
+        _build_cmd(model, model_checkpoint="opendde_v2")
 
-    assert cmd[cmd.index("--load_checkpoint_path") + 1] == "/custom/ckpt.pt"
+
+def test_opendde_bundled_checkpoints_are_downloaded_by_setup():
+    """Every bundled checkpoint the resolver can select must be fetched by setup.sh."""
+    mod = _load_standalone_inference()
+    standalone_dir = Path(mod.__file__).resolve().parent
+    setup = (standalone_dir / "setup.sh").read_text()
+    assert "opendde.pt" in setup  # opendde_v1 default weights
+    for rel in mod._BUNDLED_CHECKPOINTS.values():
+        if rel:
+            assert Path(rel).name in setup, f"setup.sh does not download bundled checkpoint {rel}"
 
 
 # ── Config: cloud support gate ───────────────────────────────────────────────
 
 
 def test_opendde_cloud_unsupported_reason():
-    """A local load_checkpoint_path yields a reason; otherwise None."""
+    """A bundled model name is cloud-OK; a custom checkpoint path is not."""
     assert OpenDDEConfig(use_msa=False).cloud_unsupported_reason() is None
-    assert OpenDDEConfig(use_msa=False, load_checkpoint_path="/local/ckpt.pt").cloud_unsupported_reason() is not None
+    assert OpenDDEConfig(use_msa=False, model_checkpoint="opendde_abag").cloud_unsupported_reason() is None
+    assert OpenDDEConfig(use_msa=False, model_checkpoint="/local/ckpt.pt").cloud_unsupported_reason() is not None
 
 
 # ── Dispatch / metric assembly (mocked worker) ───────────────────────────────
@@ -336,7 +358,7 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
             num_samples=2,
             num_steps=33,
             num_cycles=4,
-            model_name="opendde_abag",
+            model_checkpoint="opendde_abag",
         ),
     )
 
@@ -365,7 +387,7 @@ def test_opendde_run_builds_structure_with_metrics(monkeypatch):
     assert input_data["num_samples"] == 2
     assert input_data["num_steps"] == 33
     assert input_data["num_cycles"] == 4
-    assert input_data["model_name"] == "opendde_abag"
+    assert input_data["model_checkpoint"] == "opendde_abag"
 
 
 def test_opendde_iptm_surfaced_when_present(monkeypatch):
