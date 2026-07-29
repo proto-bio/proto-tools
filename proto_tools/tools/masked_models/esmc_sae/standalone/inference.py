@@ -27,18 +27,28 @@ BACKBONE_REPOS = {
 class ESMCSAEModel:
     """ESM C backbone with sparse autoencoders attached to selected layers."""
 
-    def __init__(self, model_checkpoint: str = "esmc_300m", sae_repo: str = "", layers: tuple[int, ...] = ()):
+    def __init__(
+        self,
+        model_checkpoint: str = "esmc_300m",
+        sae_repo: str = "",
+        layers: tuple[int, ...] = (),
+        backbone: str = "transformers",
+    ):
         """Initialize the wrapper.
 
         Args:
             model_checkpoint: ESM C backbone key, e.g. ``"esmc_300m"``.
             sae_repo: HuggingFace repo id holding the SAE weights.
             layers: Backbone layer indices to attach SAEs to.
+            backbone: ``"transformers"`` for the published path, or ``"esm"`` to read
+                activations from the esmc toolkit's weights.
         """
         self._loaded = False
         self.model_checkpoint = model_checkpoint
         self.sae_repo = sae_repo
         self.layers = tuple(layers)
+        self.backbone = backbone
+        self.sae: Any = None
         self.device: str | None = None
         self.model: Any = None
         self.tokenizer: Any = None
@@ -76,6 +86,13 @@ class ESMCSAEModel:
         batches = [sequences[i : i + batch_size] for i in range(0, len(sequences), batch_size)]
         features: list[dict[str, dict[str, list[list[float]]]]] = []
 
+        if self.backbone == "esm":
+            for batch in tqdm(
+                batches, desc="ESM C SAE inference", unit="batch", total=len(batches), disable=not verbose
+            ):
+                features.extend(self._esm_batch(batch, device))
+            return {"features": features}
+
         for batch in tqdm(
             batches, desc="ESM C SAE inference", unit="batch", total=len(batches), disable=not verbose
         ):
@@ -92,6 +109,46 @@ class ESMCSAEModel:
             features.extend(self._split_batch(outputs["sae_outputs"], token_counts))
 
         return {"features": features}
+
+    def _esm_batch(self, batch: list[str], device: str) -> list[dict[str, dict[str, list[list[float]]]]]:
+        """Run one batch through the esm-package backbone and apply the SAEs directly.
+
+        The esm package exposes ``hidden_states`` as (layer, batch, seq, d) with padding
+        preserved, and its stack omits the embedding output that Transformers keeps at
+        index 0. A Transformers ``layer{N}`` SAE therefore reads ``hidden_states[N - 1]``;
+        ``test_esm_backbone_layer_offset`` pins that offset.
+
+        Args:
+            batch: Protein sequences.
+            device: Device to run on.
+
+        Returns:
+            One dict per sequence, keyed by layer index as a string.
+        """
+        input_ids = self.model._tokenize(batch)
+        token_counts = (input_ids != self.model.tokenizer.pad_token_id).sum(dim=1).tolist()
+
+        with torch.inference_mode():
+            hidden_states = self.model(input_ids).hidden_states
+
+        per_sequence: list[dict[str, dict[str, list[list[float]]]]] = [{} for _ in batch]
+        for layer in self.layers:
+            layer_module = self.sae.layers[str(layer)]
+            source = hidden_states[layer - 1].to(dtype=next(layer_module.parameters()).dtype)
+            with torch.inference_mode():
+                magnitudes = layer_module(source).feature_magnitudes
+
+            for seq_idx, count in enumerate(token_counts):
+                # Strip the start and end tokens to align with the input residues.
+                rows = magnitudes[seq_idx, 1 : count - 1]
+                sorted_magnitudes, indices = torch.sort(rows, dim=-1, descending=True)
+                active = (rows != 0).sum(dim=-1)
+                keep = int(active.max().item()) if active.numel() else 0
+                per_sequence[seq_idx][str(layer)] = {
+                    "indices": serialize_output(indices[:, :keep].to(torch.int64)),
+                    "magnitudes": serialize_output(sorted_magnitudes[:, :keep].to(torch.float32)),
+                }
+        return per_sequence
 
     def _split_batch(
         self, sae_outputs: dict[str, torch.Tensor], token_counts: list[int]
@@ -135,24 +192,38 @@ class ESMCSAEModel:
     # ============================================================================
     def load(self, device: str, verbose: bool = False) -> None:
         """Load the backbone and SAE layers onto the device."""
-        from transformers import AutoModel, AutoTokenizer
         from transformers.models.esmc.modeling_esmc_sae import ESMCSAEModel as HFSAEModel
 
-        repo = BACKBONE_REPOS[self.model_checkpoint]
-        if verbose:
-            logger.info(f"Loading ESM C backbone {repo} on {device}")
         logger.update_status(f"Loading {self.model_checkpoint}")
+        if self.backbone == "esm":
+            from esm.models.esmc import ESMC
 
-        self.model = AutoModel.from_pretrained(repo, device_map=device).eval()
-        self.tokenizer = AutoTokenizer.from_pretrained(repo)
+            if verbose:
+                logger.info(f"Loading ESM C backbone {self.model_checkpoint} (esm package) on {device}")
+            self.model = ESMC.from_pretrained(self.model_checkpoint, device=torch.device(device)).eval()
+            self.tokenizer = self.model.tokenizer
+        else:
+            from transformers import AutoModel, AutoTokenizer
+
+            repo = BACKBONE_REPOS[self.model_checkpoint]
+            if verbose:
+                logger.info(f"Loading ESM C backbone {repo} on {device}")
+            self.model = AutoModel.from_pretrained(repo, device_map=device).eval()
+            self.tokenizer = AutoTokenizer.from_pretrained(repo)
 
         # Fetch only the requested layers; the all-layer SAE repos hold one file
         # per backbone layer and the 6B collection is tens of gigabytes.
         allow_patterns = ["config.json"] + [f"layer_{layer}.safetensors" for layer in self.layers]
         logger.update_status(f"Loading SAE layers {list(self.layers)}")
-        sae = HFSAEModel.from_pretrained(self.sae_repo, allow_patterns=allow_patterns, device=self.model.device)
+        device_for_sae = self.model.device if hasattr(self.model, "device") else device
+        sae = HFSAEModel.from_pretrained(
+            self.sae_repo, allow_patterns=allow_patterns, device=device_for_sae
+        )
         sae.initialize_layers(list(self.layers))
-        self.model.add_sae_models([sae.layers[str(layer)] for layer in self.layers])
+        self.sae = sae
+        # The esm path applies the SAE modules itself; only Transformers hooks them in.
+        if self.backbone != "esm":
+            self.model.add_sae_models([sae.layers[str(layer)] for layer in self.layers])
 
         self.device = device
         self._loaded = True
@@ -193,11 +264,18 @@ def dispatch(input_dict: dict[str, Any]) -> dict[str, Any]:
     """Entry point for both persistent-worker and one-shot execution."""
     global _model
     layers = tuple(input_dict["layers"])
-    if _model is None or _model.sae_repo != input_dict["sae_repo"] or _model.layers != layers:
+    backbone = input_dict.get("backbone", "transformers")
+    if (
+        _model is None
+        or _model.sae_repo != input_dict["sae_repo"]
+        or _model.layers != layers
+        or _model.backbone != backbone
+    ):
         _model = ESMCSAEModel(
             model_checkpoint=input_dict["model_checkpoint"],
             sae_repo=input_dict["sae_repo"],
             layers=layers,
+            backbone=backbone,
         )
 
     operation = input_dict["operation"]

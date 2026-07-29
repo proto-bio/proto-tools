@@ -20,6 +20,7 @@ ESMC_SAE_CHECKPOINTS = Literal["esmc_300m", "esmc_600m", "esmc_6b"]
 ESMC_SAE_TARGETS = Literal["hidden_states", "mlp_outputs"]
 ESMC_SAE_K = Literal[16, 32, 64, 128, 256, 512]
 ESMC_SAE_CODEBOOK_SIZES = Literal[8192, 16384, 32768, 65536, 131072]
+ESMC_SAE_BACKBONES = Literal["transformers", "esm"]
 
 # HuggingFace repo stem per backbone, and the backbone's transformer depth.
 _BACKBONES: dict[str, tuple[str, int]] = {
@@ -213,6 +214,10 @@ class ESMCSAEFeaturesConfig(BaseConfig):
             single-layer SAE, so ``layers`` must be the sweep layer.
         codebook_size (ESMC_SAE_CODEBOOK_SIZES): Total features the SAE can represent.
             Larger codebooks split concepts more finely.
+        backbone (ESMC_SAE_BACKBONES): Which ESM C implementation supplies the activations
+            the SAE reads. ``"transformers"`` matches the published SAE documentation.
+            ``"esm"`` reads the ``esmc`` toolkit's weights instead, avoiding a second
+            backbone download at the cost of ~1% disagreement in active features.
         batch_size (int): Sequences per forward pass.
         device (str): Device to run the model on.
 
@@ -249,6 +254,12 @@ class ESMCSAEFeaturesConfig(BaseConfig):
         title="Codebook Size",
         default=16384,
         description="Total features the SAE can represent; larger splits concepts more finely",
+        reload_on_change=True,
+    )
+    backbone: ESMC_SAE_BACKBONES = ConfigField(
+        title="Backbone Source",
+        default="transformers",
+        description="Which ESM C implementation supplies activations; 'esm' reuses the esmc toolkit weights",
         reload_on_change=True,
     )
     batch_size: int = ConfigField(
@@ -363,6 +374,7 @@ def run_esmc_sae_features(
             "model_checkpoint": config.model_checkpoint,
             "sae_repo": config.sae_repo,
             "layers": config.resolved_layers,
+            "backbone": config.backbone,
             "batch_size": config.batch_size,
             "device": config.device,
             "verbose": config.verbose,

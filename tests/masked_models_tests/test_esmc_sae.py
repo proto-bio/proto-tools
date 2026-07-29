@@ -166,3 +166,55 @@ def test_esmc_sae_features_benchmark(request):
     assert result.tool_id == "esmc-sae-features"
     assert len(result.results) == 50
     assert len(result.results[0].layers[0].feature_indices) == 200
+
+
+# ── Backbone comparison (exploratory) ─────────────────────────────────────────
+
+
+def _top_k_overlap(a, b) -> float:
+    """Mean fraction of shared active features per residue between two results."""
+    per_residue = [
+        len(set(x) & set(y)) / len(x)
+        for layer_a, layer_b in zip(a.layers, b.layers, strict=True)
+        for x, y in zip(layer_a.feature_indices, layer_b.feature_indices, strict=True)
+    ]
+    return sum(per_residue) / len(per_residue)
+
+
+@pytest.mark.uses_gpu
+def test_esm_backbone_layer_offset():
+    """The esm stack omits the embedding output, so layer{N} reads hidden_states[N-1].
+
+    Pinning this guards the one assumption the esm backbone path rests on. If upstream
+    reindexes ``hidden_states``, agreement collapses and this fails rather than silently
+    returning features from the wrong layer.
+    """
+    inputs = ESMCSAEFeaturesInput(sequences=["MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQ"])
+    config = ESMCSAEFeaturesConfig(layers=[23])
+
+    reference = run_esmc_sae_features(inputs=inputs, config=config)
+    candidate = run_esmc_sae_features(
+        inputs=inputs, config=ESMCSAEFeaturesConfig(layers=[23], backbone="esm")
+    )
+
+    overlap = _top_k_overlap(reference.results[0], candidate.results[0])
+    assert overlap > 0.95, (
+        f"esm backbone agrees on only {overlap:.3f} of active features; the "
+        f"hidden_states[N-1] offset may no longer hold"
+    )
+
+
+@pytest.mark.uses_gpu
+def test_esm_backbone_returns_same_shape_as_transformers():
+    """Both backbones produce identically shaped per-residue features."""
+    sequences = ["MKTAYIAKQRQISFVKSHFSRQ", "MVLSPADKTNVKAAW"]
+    inputs = ESMCSAEFeaturesInput(sequences=sequences)
+
+    for backbone in ("transformers", "esm"):
+        result = run_esmc_sae_features(
+            inputs=inputs, config=ESMCSAEFeaturesConfig(layers=[11, 23], batch_size=2, backbone=backbone)
+        )
+        assert len(result.results) == len(sequences), backbone
+        for sequence, per_sequence in zip(sequences, result.results, strict=True):
+            for layer in per_sequence.layers:
+                assert len(layer.feature_indices) == len(sequence), f"{backbone} layer{layer.layer}"
