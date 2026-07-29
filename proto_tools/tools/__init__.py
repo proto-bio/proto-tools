@@ -328,6 +328,9 @@ from proto_tools.tools.masked_models import (
     ESMCEmbeddingsConfig,
     ESMCEmbeddingsInput,
     ESMCEmbeddingsOutput,
+    ESMCSAEFeaturesConfig,
+    ESMCSAEFeaturesInput,
+    ESMCSAEFeaturesOutput,
     MaskedModelScoringMetrics,
     MaskingStrategy,
     Projection2D,
@@ -344,6 +347,7 @@ from proto_tools.tools.masked_models import (
     run_esm3_sample,
     run_esm3_score,
     run_esmc_embeddings,
+    run_esmc_sae_features,
 )
 
 # Mutagenesis tools
@@ -1504,6 +1508,11 @@ __all__ = [
     "ESMCEmbeddingsInput",
     "ESMCEmbeddingsConfig",
     "ESMCEmbeddingsOutput",
+    # Masked models - ESM C SAE Features
+    "run_esmc_sae_features",
+    "ESMCSAEFeaturesInput",
+    "ESMCSAEFeaturesConfig",
+    "ESMCSAEFeaturesOutput",
     # RNA splicing - SpliceTransformer
     "run_splice_transformer",
     "SpliceTransformerInput",

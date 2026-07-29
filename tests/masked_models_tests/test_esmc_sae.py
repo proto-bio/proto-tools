@@ -1,0 +1,168 @@
+"""tests/masked_models_tests/test_esmc_sae.py.
+
+Tests for ESM C sparse autoencoder feature extraction.
+"""
+
+import json
+
+import pytest
+from pydantic import ValidationError
+
+from proto_tools.tools.masked_models.esmc_sae import (
+    ESMCSAEFeaturesConfig,
+    ESMCSAEFeaturesInput,
+    resolve_sae_repo,
+    run_esmc_sae_features,
+)
+from tests.conftest import benchmark_twice, make_persistent_fixture, random_protein_sequences
+from tests.tool_infra_tests.test_export_functionality import validate_output
+
+_persistent_tool = make_persistent_fixture("esmc_sae")
+
+
+# ── Repo resolution ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_repo"),
+    [
+        # k=64 at a published codebook size serves any layer set.
+        ({}, "biohub/ESMC-300M-sae-k64-codebook16384"),
+        ({"layers": [0, 11, 23]}, "biohub/ESMC-300M-sae-k64-codebook16384"),
+        ({"model_checkpoint": "esmc_600m"}, "biohub/ESMC-600M-sae-k64-codebook16384"),
+        # 6B is the only backbone with an all-layer 131072 codebook.
+        (
+            {"model_checkpoint": "esmc_6b", "codebook_size": 131072},
+            "biohub/ESMC-6B-sae-k64-codebook131072",
+        ),
+        # MLP-output SAEs are published only at 131072.
+        (
+            {"sae_target": "mlp_outputs", "codebook_size": 131072},
+            "biohub/ESMC-300M-sae-mlp-k64-codebook131072",
+        ),
+        # Non-default k falls through to the single-layer sweep.
+        ({"k": 256, "codebook_size": 65536}, "biohub/ESMC-300M-sae-layer23-k256-codebook65536"),
+        # 300M has no all-layer 131072, but the sweep layer publishes one.
+        ({"codebook_size": 131072}, "biohub/ESMC-300M-sae-layer23-k64-codebook131072"),
+    ],
+)
+def test_config_resolves_published_sae_repo(kwargs, expected_repo):
+    """Each accepted config maps to the repo that actually publishes that SAE."""
+    assert ESMCSAEFeaturesConfig(**kwargs).sae_repo == expected_repo
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        # Sweeping k requires the sweep layer, not an arbitrary one.
+        {"k": 256, "codebook_size": 65536, "layers": [11]},
+        # No MLP-output SAE at 16384, and no MLP sweep at all.
+        {"sae_target": "mlp_outputs"},
+        {"sae_target": "mlp_outputs", "k": 256, "codebook_size": 65536},
+        # Layer beyond the backbone's depth, and duplicates.
+        {"layers": [99]},
+        {"layers": [11, 11]},
+    ],
+)
+def test_config_rejects_unpublished_combinations(kwargs):
+    """Combinations Biohub never published are rejected at construction."""
+    with pytest.raises(ValidationError):
+        ESMCSAEFeaturesConfig(**kwargs)
+
+
+def test_resolve_sae_repo_error_names_alternatives():
+    """The rejection message tells the caller which combinations do exist."""
+    with pytest.raises(ValueError, match=r"k=64.*codebook_size in \[16384\].*layers=\[23\]"):
+        resolve_sae_repo("esmc_300m", "hidden_states", [11], 256, 65536)
+
+
+def test_layers_default_to_backbone_sweep_layer():
+    """``layers=None`` resolves to the ~75%-depth layer for each backbone."""
+    assert ESMCSAEFeaturesConfig(model_checkpoint="esmc_300m").resolved_layers == [23]
+    assert ESMCSAEFeaturesConfig(model_checkpoint="esmc_600m").resolved_layers == [27]
+    assert ESMCSAEFeaturesConfig(model_checkpoint="esmc_6b").resolved_layers == [60]
+
+
+def test_layers_are_sorted():
+    """Requested layers are normalized to ascending order."""
+    assert ESMCSAEFeaturesConfig(layers=[23, 0, 11]).resolved_layers == [0, 11, 23]
+
+
+# ── Integration ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.uses_gpu
+def test_esmc_sae_features_align_with_residues():
+    """Features are returned per residue, per layer, with exactly k active each.
+
+    The SAE stack emits one row per unpadded token concatenated across the batch,
+    so a batch of unequal-length sequences is the case that catches mis-splitting.
+    """
+    sequences = ["MKTAYIAKQRQISFVKSHFSRQ", "MVLSPADKTNVKAAW"]
+    config = ESMCSAEFeaturesConfig(layers=[11, 23], batch_size=2)
+
+    result = run_esmc_sae_features(inputs=ESMCSAEFeaturesInput(sequences=sequences), config=config)
+    validate_output(result)
+
+    assert result.tool_id == "esmc-sae-features"
+    assert len(result.results) == len(sequences)
+
+    for sequence, per_sequence in zip(sequences, result.results, strict=True):
+        assert [layer.layer for layer in per_sequence.layers] == [11, 23]
+        for layer in per_sequence.layers:
+            assert len(layer.feature_indices) == len(sequence)
+            assert len(layer.feature_magnitudes) == len(sequence)
+            assert {len(row) for row in layer.feature_indices} == {config.k}
+            # Magnitudes arrive ordered so callers can take the strongest features.
+            for row in layer.feature_magnitudes:
+                assert row == sorted(row, reverse=True)
+
+
+@pytest.mark.uses_gpu
+def test_esmc_sae_distinct_sequences_produce_distinct_features():
+    """Unrelated sequences do not collapse to the same active features."""
+    inputs = ESMCSAEFeaturesInput(sequences=["MVLSPADKTNVKAAW", "AAAAAAAAAAAAAAA"])
+    result = run_esmc_sae_features(inputs=inputs, config=ESMCSAEFeaturesConfig())
+
+    first = result.results[0].layers[0].feature_indices
+    second = result.results[1].layers[0].feature_indices
+    assert any(a != b for a, b in zip(first, second, strict=True))
+
+
+@pytest.mark.uses_gpu
+def test_esmc_sae_export_writes_every_active_feature(tmp_path):
+    """Export writes per-residue features to both supported formats."""
+    sequence = "MKTAYIAKQR"
+    inputs = ESMCSAEFeaturesInput(sequences=[sequence])
+    config = ESMCSAEFeaturesConfig()
+    result = run_esmc_sae_features(inputs=inputs, config=config)
+
+    result.export(name="features", export_path=tmp_path, file_format="json")
+    result.export(name="features", export_path=tmp_path, file_format="csv")
+
+    assert json.loads((tmp_path / "features.json").read_text())[0]["layers"][0]["layer"] == 23
+
+    rows = (tmp_path / "features.csv").read_text().splitlines()
+    # One header plus one row per (residue, active feature).
+    assert len(rows) == 1 + len(sequence) * config.k
+
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.benchmark("esmc-sae-features")
+@pytest.mark.slow
+@pytest.mark.uses_gpu
+def test_esmc_sae_features_benchmark(request):
+    """Benchmark esmc-sae-features on 50 sequences of length 200 (cold + warm)."""
+    sequences = random_protein_sequences(n=50, length=200, seed=0)
+    inputs = ESMCSAEFeaturesInput(sequences=sequences)
+    config = ESMCSAEFeaturesConfig(batch_size=8)
+
+    result = benchmark_twice(
+        request, "esmc_sae", lambda: run_esmc_sae_features(inputs=inputs, config=config)
+    )
+
+    assert result.tool_id == "esmc-sae-features"
+    assert len(result.results) == 50
+    assert len(result.results[0].layers[0].feature_indices) == 200
