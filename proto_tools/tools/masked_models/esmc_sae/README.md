@@ -2,6 +2,8 @@
 
 # ESM C SAE Features
 
+![ESM C SAE Features](https://proto-bio.github.io/proto-assets/images/tool/esmc_sae/hero.png)
+
 > [!NOTE]
 > **License:** ESM C SAE Features is open source and free for academic and commercial use under an MIT license. Please refer to [the license](https://github.com/Biohub/esm/blob/main/LICENSE.md) for full terms.
 
@@ -23,7 +25,7 @@ Runs each sequence through the ESM C backbone once with SAEs attached to the req
 
 #### Applications
 
-Feature activations show which concepts the model recognizes at each residue, which supports interpreting what drives an embedding, locating functional sites without supervision, and comparing how proteins are represented internally. Because features are sparse and indexed, activations are directly comparable across proteins: the same feature index means the same learned concept. The `ESMC-6B-sae-layer60-k64-codebook16384` SAE additionally has agent-generated natural-language descriptions for its codebook, available through the ESM Atlas.
+Feature activations show which concepts the model recognizes at each residue, which supports interpreting what drives an embedding, locating functional sites without supervision, and comparing how proteins are represented internally. Because features are sparse and indexed, activations are directly comparable across proteins: within one SAE, a feature index always denotes the same learned concept. Indices are not comparable between different SAEs, including different layers of the same backbone, since each is trained separately and orders its codebook arbitrarily. The `ESMC-6B-sae-layer60-k64-codebook16384` SAE additionally has agent-generated natural-language descriptions for its codebook, available through the ESM Atlas.
 
 #### Usage Tips
 
