@@ -23,7 +23,7 @@ The SAEs were trained with two structural hyperparameters that set granularity. 
 
 ### ESM C SAE Features (`esmc-sae-features`)
 
-Runs each sequence through the ESM C backbone once with SAEs attached to the requested layers, and returns the active codebook features at each residue, ordered by descending magnitude. Start and end tokens are stripped so positions align with the input sequence.
+Runs each sequence through the ESM C backbone once with SAEs attached to the requested layers, and returns the active codebook features at each residue, ordered by descending magnitude. Start and end tokens are stripped so positions align with the input sequence: `feature_indices[0]` holds the features for residue 1, and the `position` column of an exported CSV is 1-indexed, matching the rest of proto-tools.
 
 #### Applications
 

@@ -115,10 +115,13 @@ class SAELayerFeatures(BaseModel):
     tokenizer's start and end tokens are stripped. Each inner list holds the
     ``k`` active features at that residue, ordered by descending magnitude.
 
+    Both arrays are in sequence order, so list index ``i`` describes residue
+    ``i + 1`` of the input under proto-tools' 1-indexed coordinate convention.
+
     Attributes:
         layer (int): Backbone transformer layer the SAE reads from.
         feature_indices (list[list[int]]): Active codebook indices per residue, in
-            sequence order; entry 0 is residue 1 of the input.
+            sequence order; entry ``i`` is residue ``i + 1`` (1-indexed).
         feature_magnitudes (list[list[float]]): Activation values per residue.
     """
 
@@ -380,7 +383,8 @@ def run_esmc_sae_features(
 
     Returns:
         ESMCSAEFeaturesOutput: One ``SequenceSAEFeatures`` per input sequence, each
-            holding per-layer active feature indices and magnitudes for every residue.
+            holding per-layer active feature indices and magnitudes for every residue,
+            in sequence order (list index ``i`` is residue ``i + 1``).
 
     See Also:
         - ESM C SAE collection: https://huggingface.co/collections/biohub/esmc-saes-for-hidden-states-all-layers
