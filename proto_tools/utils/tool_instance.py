@@ -759,6 +759,7 @@ class ToolInstance:
         On a cross-session failure (FAILED STATUS.txt from a previous run),
         logs a warning and retries the build.
         """
+        self._purge_legacy_helper_copies()
         if getattr(self, "_env_ready", False):
             return
         if self.toolkit in self._build_failures:
@@ -1849,6 +1850,38 @@ class ToolInstance:
         return self._parse_python_version(content, platform_key, str(version_file))
 
     _HELPER_ARTIFACTS = frozenset({"standalone_helpers", "standalone_helpers.sh", "standalone_helpers.py"})
+
+    _purged_helper_dirs: ClassVar[set[Path]] = set()
+
+    def _purge_legacy_helper_copies(self) -> None:
+        """Remove helper copies that older proto_tools versions wrote next to the standalone script.
+
+        The persistent worker is protected by ``_prepend_helpers_dir_to_sys_path``, but
+        ``_run_oneshot`` execs the script directly with no bootstrap, so CPython pins
+        ``sys.path[0]`` to the script's own directory and a leftover copy there outranks the
+        published one. One-shot is the default path for a plain ``run_*()`` call, so the
+        leftovers have to go rather than be out-ranked.
+
+        Best-effort and once per directory per process: a read-only tree cannot be cleaned,
+        and the warning names the command that fixes it.
+        """
+        directory = self.script_path.parent
+        if directory in self._purged_helper_dirs:
+            return
+        self._purged_helper_dirs.add(directory)
+        for name in self._HELPER_ARTIFACTS:
+            stale = directory / name
+            if not stale.exists():
+                continue
+            try:
+                if stale.is_dir():
+                    shutil.rmtree(stale)
+                else:
+                    stale.unlink()
+            except OSError as e:
+                logger.warning(
+                    "Could not remove stale helper copy %s (%s); remove it with `rm -rf %s`", stale, e, stale
+                )
 
     @staticmethod
     def _has_valid_standalone(standalone_dir: Path) -> bool:

@@ -2064,6 +2064,99 @@ def test_cleanup_ignores_dirs_with_unknown_files(tmp_path: Path) -> None:
     assert tool.exists()
 
 
+def _instance_with_script_dir(script_dir: Path) -> ToolInstance:
+    """A bare ToolInstance whose script lives in ``script_dir``, for purge tests."""
+    inst = ToolInstance.__new__(ToolInstance)
+    inst.script_path = script_dir / "run.py"
+    ToolInstance._purged_helper_dirs.discard(script_dir)
+    return inst
+
+
+def test_purge_removes_legacy_helper_copies(tmp_path: Path) -> None:
+    """Copies written by older versions are removed; real tool files are untouched."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+    (standalone / "setup.sh").touch()
+    (standalone / "standalone_helpers.sh").touch()
+    (standalone / "standalone_helpers.py").touch()
+    helpers_pkg = standalone / "standalone_helpers"
+    helpers_pkg.mkdir()
+    (helpers_pkg / "__init__.py").touch()
+
+    _instance_with_script_dir(standalone)._purge_legacy_helper_copies()
+
+    assert not helpers_pkg.exists()
+    assert not (standalone / "standalone_helpers.sh").exists()
+    assert not (standalone / "standalone_helpers.py").exists()
+    assert (standalone / "run.py").exists()
+    assert (standalone / "setup.sh").exists()
+
+
+def test_purge_is_what_keeps_a_stale_copy_off_sys_path_zero(tmp_path: Path) -> None:
+    """Why the purge exists: one-shot execs the script directly, so its dir is sys.path[0].
+
+    ``_run_oneshot`` builds ``[env/bin/python, <script>, ...]`` with no bootstrap, so nothing
+    can re-order ``sys.path`` from outside and a sibling ``standalone_helpers/`` wins over the
+    published one. Removing it is the only lever.
+    """
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").write_text("import standalone_helpers\n")
+    stale = standalone / "standalone_helpers"
+    stale.mkdir()
+    (stale / "__init__.py").write_text("raise RuntimeError('stale copy imported')\n")
+
+    proc = subprocess.run(
+        [sys.executable, str(standalone / "run.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "stale copy imported" in proc.stderr, "expected the sibling copy to win before purging"
+
+    _instance_with_script_dir(standalone)._purge_legacy_helper_copies()
+
+    proc = subprocess.run(
+        [sys.executable, str(standalone / "run.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "stale copy imported" not in proc.stderr
+
+
+def test_purge_warns_instead_of_raising_on_read_only_tree(tmp_path: Path, caplog) -> None:
+    """A read-only install can't be cleaned, but that must not break the run."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+    (standalone / "standalone_helpers.py").touch()
+    standalone.chmod(0o555)
+
+    try:
+        with caplog.at_level(logging.WARNING):
+            _instance_with_script_dir(standalone)._purge_legacy_helper_copies()
+    finally:
+        standalone.chmod(0o755)
+
+    assert "standalone_helpers.py" in caplog.text
+
+
+def test_purge_runs_once_per_directory(tmp_path: Path) -> None:
+    """The purge is cheap on the hot path: a directory is only scanned once per process."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+
+    inst = _instance_with_script_dir(standalone)
+    inst._purge_legacy_helper_copies()
+    (standalone / "standalone_helpers.py").touch()
+    inst._purge_legacy_helper_copies()
+
+    assert (standalone / "standalone_helpers.py").exists()
+
+
 def test_get_tool_dirs_resolves_duplicate_names_by_init_py(tmp_path: Path) -> None:
     _make_standalone(tmp_path, "old_cat", "mytool", ["setup.sh"])
     real = _make_standalone(tmp_path, "new_cat", "mytool", ["setup.sh", "run.py"])
