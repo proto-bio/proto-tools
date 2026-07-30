@@ -29,6 +29,15 @@ def _fetch_feature(feature_index: int, timeout: float) -> dict[str, Any]:
     return dict(response.json())
 
 
+def _fetch_feature_or_none(feature_index: int, timeout: float) -> dict[str, Any] | None:
+    """Fetch one feature's record, or ``None`` if the API has nothing for that index."""
+    try:
+        return _fetch_feature(feature_index, timeout)
+    except Exception as exc:
+        logger.debug("esmc_sae: no description for feature %s: %s", feature_index, exc)
+        return None
+
+
 def describe_sae_features(
     feature_indices: list[int] | tuple[int, ...] | int,
     timeout: float = 30.0,
@@ -84,11 +93,11 @@ def describe_sae_features(
     described: dict[int, dict[str, Any]] = {}
     unavailable: list[int] = []
     for feature_index in dict.fromkeys(feature_indices):
-        try:
-            described[feature_index] = _fetch_feature(feature_index, timeout)
-        except Exception as exc:  # noqa: BLE001 — one bad index should not sink the batch
-            logger.debug("esmc_sae: no description for feature %s: %s", feature_index, exc)
+        record = _fetch_feature_or_none(feature_index, timeout)
+        if record is None:
             unavailable.append(feature_index)
+        else:
+            described[feature_index] = record
 
     if unavailable:
         logger.warning(

@@ -6,7 +6,7 @@ ESM C sparse autoencoder (SAE) feature extraction.
 import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 

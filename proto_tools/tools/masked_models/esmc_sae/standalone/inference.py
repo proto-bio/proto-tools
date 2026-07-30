@@ -90,7 +90,7 @@ class ESMCSAEModel:
             for batch in tqdm(
                 batches, desc="ESM C SAE inference", unit="batch", total=len(batches), disable=not verbose
             ):
-                features.extend(self._esm_batch(batch, device))
+                features.extend(self._esm_batch(batch))
             return {"features": features}
 
         for batch in tqdm(
@@ -110,7 +110,7 @@ class ESMCSAEModel:
 
         return {"features": features}
 
-    def _esm_batch(self, batch: list[str], device: str) -> list[dict[str, dict[str, list[list[float]]]]]:
+    def _esm_batch(self, batch: list[str]) -> list[dict[str, dict[str, list[list[float]]]]]:
         """Run one batch through the esm-package backbone and apply the SAEs directly.
 
         The esm package exposes ``hidden_states`` as (layer, batch, seq, d) with padding
@@ -120,7 +120,6 @@ class ESMCSAEModel:
 
         Args:
             batch: Protein sequences.
-            device: Device to run on.
 
         Returns:
             One dict per sequence, keyed by layer index as a string.
