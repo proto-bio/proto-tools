@@ -1859,6 +1859,10 @@ class ToolInstance:
         Those copies sit at ``sys.path[0]`` for one-shot runs, so they outrank the installed
         package and would shadow it indefinitely. Best-effort and once per directory per
         process: a read-only tree can't be cleaned, and the warning names the fix.
+
+        TODO(2026-11): drop this migration cleanup once no working checkout still carries
+        the copies. It is the only runtime write this class makes into the package tree, and
+        PYTHONPATH ordering already prevents shadowing whether or not the delete succeeds.
         """
         directory = self.script_path.parent
         if directory in self._purged_helper_dirs:
