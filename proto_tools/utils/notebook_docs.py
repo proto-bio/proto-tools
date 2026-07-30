@@ -76,8 +76,26 @@ def _field_table(title: str, doc: ModelDoc) -> str:
     return header + "\n" + _field_rows(doc)
 
 
+def _without_base_config_fields(doc: ModelDoc) -> ModelDoc:
+    """Drop the runtime fields every config inherits from ``BaseConfig``.
+
+    ``device``, ``seed``, ``timeout`` and ``verbose`` control execution rather than the
+    computation, are identical across every tool, and are covered by the runtime guides.
+    Listing them in each table buries the fields that actually differ. Taken from
+    ``BaseConfig.model_fields`` rather than hardcoded, so a new inherited field is
+    excluded automatically; tools that override one are still filtered, since the
+    override changes the default rather than the field's meaning.
+    """
+    from proto_tools.utils.base_config import BaseConfig
+
+    inherited = set(BaseConfig.model_fields)
+    return doc.model_copy(update={"fields": [f for f in doc.fields if f.name not in inherited]})
+
+
 def _model_table(doc: ModelDoc, kind: str) -> str:
     """Render a ``ModelDoc`` as a markdown table for notebook display."""
+    if kind == "config":
+        doc = _without_base_config_fields(doc)
     if not doc.fields:
         return f"*No {kind} fields.*"
     return _field_table(f"**{kind.capitalize()}** — `{doc.name}`", doc)
