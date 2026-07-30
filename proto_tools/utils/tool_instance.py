@@ -64,7 +64,6 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, ClassVar
 
-from proto_tools.utils._worker_bootstrap import _copy_standalone_helpers as copy_standalone_helpers
 from proto_tools.utils.base_config import DEFAULT_TIMEOUT, BaseConfig
 from proto_tools.utils.device import parse_device_string
 from proto_tools.utils.device_manager import DeviceManager
@@ -760,6 +759,7 @@ class ToolInstance:
         On a cross-session failure (FAILED STATUS.txt from a previous run),
         logs a warning and retries the build.
         """
+        self._purge_legacy_helper_copies()
         if getattr(self, "_env_ready", False):
             return
         if self.toolkit in self._build_failures:
@@ -1296,7 +1296,6 @@ class ToolInstance:
         """
         self._ensure_env()
         sp = script_path or self.script_path
-        copy_standalone_helpers(sp)  # type: ignore[arg-type]
         device = input_dict.get("device", self.device)
         # Effective level = max(per-call config, env-var ceiling).
         effective_verbose = max(int(verbose), verbose_level_from_env())
@@ -1852,6 +1851,33 @@ class ToolInstance:
 
     _HELPER_ARTIFACTS = frozenset({"standalone_helpers", "standalone_helpers.sh", "standalone_helpers.py"})
 
+    _purged_helper_dirs: ClassVar[set[Path]] = set()
+
+    def _purge_legacy_helper_copies(self) -> None:
+        """Remove helper copies that older proto_tools versions wrote next to the standalone script.
+
+        Those copies sit at ``sys.path[0]`` for one-shot runs, so they outrank the installed
+        package and would shadow it indefinitely. Best-effort and once per directory per
+        process: a read-only tree can't be cleaned, and the warning names the fix.
+        """
+        directory = self.script_path.parent
+        if directory in self._purged_helper_dirs:
+            return
+        self._purged_helper_dirs.add(directory)
+        for name in self._HELPER_ARTIFACTS:
+            stale = directory / name
+            if not stale.exists():
+                continue
+            try:
+                if stale.is_dir():
+                    shutil.rmtree(stale)
+                else:
+                    stale.unlink()
+            except OSError as e:
+                logger.warning(
+                    "Could not remove stale helper copy %s (%s); remove it with `rm -rf %s`", stale, e, stale
+                )
+
     @staticmethod
     def _has_valid_standalone(standalone_dir: Path) -> bool:
         """Check that a standalone/ directory contains a setup.sh or runnable script."""
@@ -2071,7 +2097,7 @@ class ToolInstance:
         dest = (Path(dest_root) / toolkit).resolve()
         if dest.exists():
             raise FileExistsError(f"{dest} already exists; remove it or pass a different --dir.")
-        shutil.copytree(src, dest)
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*cls._HELPER_ARTIFACTS))
         return dest
 
     @classmethod
@@ -2387,13 +2413,6 @@ class ToolInstance:
         env["PIP_EXE"] = str(self.env_path.absolute() / "bin" / "pip")
         env["MAMBA_BIN"] = str(mamba_bin.absolute())
         env["PACKAGE_ROOT"] = str(Path(__file__).parent.parent.parent.absolute())
-
-        # Copy standalone_helpers.sh so setup.sh can source it
-        sh_source = Path(__file__).parent / "standalone_helpers_source" / "standalone_helpers.sh"
-        sh_target = self.setup_script.parent / "standalone_helpers.sh"
-        if sh_source.exists():
-            with suppress(Exception):
-                shutil.copy2(sh_source, sh_target)
 
         returncode, combined_output = _run_setup_script(
             self.setup_script,

@@ -353,9 +353,18 @@ env = get_subprocess_device_env("cuda:2")  # Maps to physical GPU
 subprocess.run(cmd, env=env)
 ```
 
-**Auto-copy mechanism:**
-- Source: `proto_tools/utils/standalone_helpers_source/standalone_helpers/` (the package, tracked in git, alongside `standalone_helpers.sh`)
-- Destination: `{tool}/standalone/standalone_helpers/` (not tracked, auto-copied at runtime by `_worker_bootstrap.py`)
+**Delivery mechanism:** helpers are never copied. `_build_subprocess_env()` publishes
+`proto_tools/utils/standalone_helpers_source/` to every tool subprocess:
+
+- on `PYTHONPATH`, so standalone scripts resolve `import standalone_helpers`
+- on `PATH`, so `setup.sh` resolves `source standalone_helpers.sh` (bash searches `PATH` for a
+  sourced name containing no slash)
+- as `PROTO_STANDALONE_HELPERS_DIR`, for the worker bootstrap's `sys.path` ordering and as an
+  escape hatch when running a tool env's interpreter by hand
+
+Tool envs contain the tool's dependencies but not `proto_tools`, which is why the helpers have
+to be published rather than imported normally. Because nothing is written, proto-tools never
+needs its own install directory to be writable at runtime.
 
 **Consistency enforcement:** The parametrized test `tests/tool_infra_tests/test_device_manager/test_tool_device_consistency.py::test_standalone_protocol_compliance` verifies that any tool making subprocess calls imports `get_subprocess_device_env()` and passes its result as `env=`.
 

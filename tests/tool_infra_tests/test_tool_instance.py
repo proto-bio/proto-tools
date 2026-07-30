@@ -1741,10 +1741,8 @@ def test_run_oneshot_demuxes_tagged_log_lines(tmp_path: Path):
     drop tagged JSON lines. The Popen + drain thread refactor delivers them live
     to ``proto_tools.worker.{toolkit}.*``.
 
-    The script is placed under a ``standalone/`` directory so the bootstrap's
-    ``_copy_standalone_helpers`` copies the helpers package into it; the package
-    init then triggers ``install()`` and the ``from standalone_helpers import
-    get_logger`` import resolves.
+    ``from standalone_helpers import get_logger`` resolves off the ``PYTHONPATH``
+    published by ``_build_subprocess_env``; the package init then triggers ``install()``.
     """
     standalone_dir = tmp_path / "standalone"
     standalone_dir.mkdir()
@@ -2064,6 +2062,66 @@ def test_cleanup_ignores_dirs_with_unknown_files(tmp_path: Path) -> None:
     ToolInstance._cleanup_stale_standalone_dirs(tools_dir=tmp_path)
 
     assert tool.exists()
+
+
+def _instance_with_script_dir(script_dir: Path) -> ToolInstance:
+    """A bare ToolInstance whose script lives in ``script_dir``, for purge tests."""
+    inst = ToolInstance.__new__(ToolInstance)
+    inst.script_path = script_dir / "run.py"
+    ToolInstance._purged_helper_dirs.discard(script_dir)
+    return inst
+
+
+def test_purge_removes_legacy_helper_copies(tmp_path: Path) -> None:
+    """Copies written by older versions are removed; real tool files are untouched."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+    (standalone / "setup.sh").touch()
+    (standalone / "standalone_helpers.sh").touch()
+    (standalone / "standalone_helpers.py").touch()
+    helpers_pkg = standalone / "standalone_helpers"
+    helpers_pkg.mkdir()
+    (helpers_pkg / "__init__.py").touch()
+
+    _instance_with_script_dir(standalone)._purge_legacy_helper_copies()
+
+    assert not helpers_pkg.exists()
+    assert not (standalone / "standalone_helpers.sh").exists()
+    assert not (standalone / "standalone_helpers.py").exists()
+    assert (standalone / "run.py").exists()
+    assert (standalone / "setup.sh").exists()
+
+
+def test_purge_warns_instead_of_raising_on_read_only_tree(tmp_path: Path, caplog) -> None:
+    """A read-only install can't be cleaned, but that must not break the run."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+    (standalone / "standalone_helpers.py").touch()
+    standalone.chmod(0o555)
+
+    try:
+        with caplog.at_level(logging.WARNING):
+            _instance_with_script_dir(standalone)._purge_legacy_helper_copies()
+    finally:
+        standalone.chmod(0o755)
+
+    assert "standalone_helpers.py" in caplog.text
+
+
+def test_purge_runs_once_per_directory(tmp_path: Path) -> None:
+    """The purge is cheap on the hot path: a directory is only scanned once per process."""
+    standalone = tmp_path / "standalone"
+    standalone.mkdir()
+    (standalone / "run.py").touch()
+
+    inst = _instance_with_script_dir(standalone)
+    inst._purge_legacy_helper_copies()
+    (standalone / "standalone_helpers.py").touch()
+    inst._purge_legacy_helper_copies()
+
+    assert (standalone / "standalone_helpers.py").exists()
 
 
 def test_get_tool_dirs_resolves_duplicate_names_by_init_py(tmp_path: Path) -> None:
