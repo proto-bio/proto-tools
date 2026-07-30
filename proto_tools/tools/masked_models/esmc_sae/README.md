@@ -1,0 +1,43 @@
+<a href="https://bio-pro.mintlify.app/tools/masked-models/esmc-sae"><img align="right" src="https://img.shields.io/badge/View_Docs-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="View Docs"></a><a href="examples/example.ipynb"><img align="right" src="https://img.shields.io/badge/Example_Notebook-2e7d32?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yIDNoNmE0IDQgMCAwIDEgNCA0djE0YTMgMyAwIDAgMC0zLTNIMnoiLz48cGF0aCBkPSJNMjIgM2gtNmE0IDQgMCAwIDAtNCA0djE0YTMgMyAwIDAgMSAzLTNoN3oiLz48L3N2Zz4=" alt="Example Notebook"></a><img align="right" src="https://img.shields.io/badge/Use_on_Proto-coming_soon-6c5ce7?style=flat-square&labelColor=6c5ce7&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5Z29uIHBvaW50cz0iMTMgMiAzIDE0IDEyIDE0IDExIDIyIDIxIDEwIDEyIDEwIDEzIDIiLz48L3N2Zz4=&logoColor=white" alt="Use on Proto (coming soon)">
+
+# ESM C SAE Features
+
+> [!NOTE]
+> **License:** ESM C SAE Features is open source and free for academic and commercial use under an MIT license. Please refer to [the license](https://github.com/Biohub/esm/blob/main/LICENSE.md) for full terms.
+
+## Overview
+
+Sparse autoencoders (SAEs) decompose [Biohub](https://biohub.ai)'s ESM C activations into a large, sparsely-active feature space that is easier to interpret than raw embeddings. This toolkit loads an ESM C backbone, attaches the SAEs trained against the layers you request, and returns the active features at every residue.
+
+## Background
+
+An SAE is trained to reconstruct a language model's internal activations through a bottleneck that permits only `k` active features per position out of a much larger codebook. The sparsity pressure pushes individual features toward single interpretable concepts, so a feature may correspond to a specific structural or functional property such as a zinc-binding site, a beta barrel, or a transmembrane helix. Biohub trained SAEs on ESM C using the TopK approach and used them to organize the ESM Atlas, a map of 6.8 billion proteins ([Biohub](https://www.biorxiv.org/content/10.64898/2026.06.03.729735)).
+
+Two hyperparameters set the granularity. `k` fixes how many features activate per residue, and `codebook_size` fixes how many features exist in total. Small codebooks group related concepts into one feature, for example a single metal-binding feature; large codebooks split that into dedicated zinc-finger, iron-sulfur, and calcium-binding features. SAEs are trained per layer, so `layers` selects which depth of the backbone to decompose: hidden-state SAEs read the residual stream and give a more global view, while MLP-output SAEs isolate one layer's own computation.
+
+## Tools
+
+### ESM C SAE Features (`esmc-sae-features`)
+
+Runs each sequence through the ESM C backbone once with SAEs attached to the requested layers, and returns the active codebook features at each residue, ordered by descending magnitude. Start and end tokens are stripped so positions align with the input sequence.
+
+#### Applications
+
+Feature activations show which concepts the model recognizes at each residue, which supports interpreting what drives an embedding, locating functional sites without supervision, and comparing how proteins are represented internally. Because features are sparse and indexed, activations are directly comparable across proteins: the same feature index means the same learned concept. The `ESMC-6B-sae-layer60-k64-codebook16384` SAE additionally has agent-generated natural-language descriptions for its codebook, available through the ESM Atlas.
+
+#### Usage Tips
+
+- **`layers` selects which activations are decomposed.** The default is the ~75%-depth layer Biohub sweeps (300M: 23, 600M: 27, 6B: 60), where representations transfer best to downstream tasks. Each extra layer adds a download and GPU memory.
+- **`k` and `codebook_size` are only free at the sweep layer.** All-layer SAEs exist at `k=64` and one codebook size, so varying either requires `layers` to be exactly the sweep layer. The config rejects unpublished combinations and names the valid alternatives.
+- **Only requested layers are downloaded.** The all-layer collections hold one file per backbone layer, so the 6B collection is tens of gigabytes in full; asking for two layers fetches two files.
+- **Output size scales with `k` times sequence length.** Each residue carries `k` indices and `k` magnitudes, so a 300-residue protein at `k=64` yields 19,200 pairs per layer.
+
+## Toolkit Notes
+
+<a href="https://bio-pro.mintlify.app/tools/guides/tool-persistence"><img src="https://img.shields.io/badge/Tool_Persistence_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Tool Persistence guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/device-management"><img src="https://img.shields.io/badge/Device_Management_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Device Management guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/parallel-execution"><img src="https://img.shields.io/badge/Parallel_Execution_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Parallel Execution guide"></a> <a href="https://bio-pro.mintlify.app/tools/guides/cloud-inference"><img src="https://img.shields.io/badge/Cloud_Inference_→-046e7a?style=flat-square&logo=readthedocs&logoColor=white" alt="Cloud Inference guide"></a>
+
+These apply to every ESM C SAE tool in this toolkit (`esmc-sae-features`).
+
+- **This toolkit shares the Biohub `esm` environment with ESM C and ESM3.** All three use the `biohub_esm` env; installing any one installs it for all.
+- **The backbone is loaded through Transformers, not the `esm` package.** The SAE API is defined on the Transformers ESM C model, so this toolkit loads `biohub/ESMC-300M` and siblings rather than the `esm`-package weights the `esmc` toolkit uses. Both repos hold the same parameters in different serializations, so using both toolkits downloads the backbone twice: 1.3 GB for 300M, 2.3 GB for 600M, 25.4 GB for 6B. This is deliberate — the SAEs are published and documented against the Transformers model, and reading the `esm`-package activations instead agrees on only about 99% of active features, which is the wrong trade for an interpretability tool.
+- **`batch_size` controls memory usage.** Lower it if you run out of GPU memory. For repeated calls, use `ToolInstance.persist_tool("esmc_sae")` to keep the backbone and SAEs loaded between calls.
