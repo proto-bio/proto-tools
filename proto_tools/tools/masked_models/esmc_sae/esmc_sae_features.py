@@ -228,12 +228,14 @@ class ESMCSAEFeaturesConfig(BaseConfig):
         layers (list[int] | None): Backbone layers to attach SAEs to. ``None`` uses the
             ~75%-depth layer Biohub sweeps (300M: 23, 600M: 27, 6B: 60). Each layer
             adds a download and GPU memory.
-        sae_target (ESMC_SAE_TARGETS): Activations the SAE was trained on. Hidden states
-            give a global view; MLP outputs isolate one layer's computation.
-        k (ESMC_SAE_K): Active features per residue. Non-default values require a
-            single-layer SAE, so ``layers`` must be the sweep layer.
-        codebook_size (ESMC_SAE_CODEBOOK_SIZES): Total features the SAE can represent.
-            Larger codebooks split concepts more finely.
+        sae_target (ESMC_SAE_TARGETS): Which activations the SAE was trained on. Hidden
+            states give a global view; MLP outputs isolate one layer's computation.
+        k (ESMC_SAE_K): Active features per residue. Fixed in the SAE's weights, so this
+            selects a model rather than a threshold; only ``64`` was trained against
+            every layer, and other values exist solely at the sweep layer.
+        codebook_size (ESMC_SAE_CODEBOOK_SIZES): Total features the SAE can represent,
+            also fixed in its weights. Larger codebooks split concepts more finely; which
+            sizes exist depends on ``model_checkpoint`` and ``sae_target``.
         backbone (ESMC_SAE_BACKBONES): Which ESM C implementation supplies the activations
             the SAE reads. ``"transformers"`` matches the published SAE documentation.
             ``"esm"`` reads the ``esmc`` toolkit's weights instead, avoiding a second
@@ -261,19 +263,19 @@ class ESMCSAEFeaturesConfig(BaseConfig):
     sae_target: ESMC_SAE_TARGETS = ConfigField(
         title="SAE Target",
         default="hidden_states",
-        description="Activations the SAE was trained on: residual stream or per-layer MLP output",
+        description="Selects the SAE trained on this activation source: residual stream or per-layer MLP",
         reload_on_change=True,
     )
     k: ESMC_SAE_K = ConfigField(
         title="Active Features",
         default=64,
-        description="Active features per residue; non-default values need a single-layer SAE",
+        description="Selects the SAE trained with this many active features per residue; 64 serves any layer",
         reload_on_change=True,
     )
     codebook_size: ESMC_SAE_CODEBOOK_SIZES = ConfigField(
         title="Codebook Size",
         default=16384,
-        description="Total features the SAE can represent; larger splits concepts more finely",
+        description="Selects the SAE trained with this many features in total; larger splits concepts finer",
         reload_on_change=True,
     )
     backbone: ESMC_SAE_BACKBONES = ConfigField(
