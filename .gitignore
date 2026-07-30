@@ -51,8 +51,6 @@ file_store/
 analyses/*
 !analyses/examples/
 
-# Helpers live in utils/standalone_helpers_source/ and are resolved via PYTHONPATH/PATH;
-# ignore any copies that land in tool directories.
 **/standalone/standalone_helpers/
 **/standalone/standalone_helpers.py
 **/standalone/standalone_helpers.sh

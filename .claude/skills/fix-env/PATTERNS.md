@@ -425,7 +425,7 @@ Failures related to the DeviceManager infrastructure — specifically environmen
 
 **Root Cause:** helpers are not copied anywhere. `_build_subprocess_env()` publishes `utils/standalone_helpers_source/` to each subprocess on `PYTHONPATH` (Python package), on `PATH` (`standalone_helpers.sh`), and as `PROTO_STANDALONE_HELPERS_DIR`. This fails only if the source directory is missing (broken install) or something clobbered those variables.
 
-A stale `standalone_helpers/` left inside a tool's `standalone/` dir by an older proto-tools can also shadow the installed package. `ToolInstance._purge_legacy_helper_copies()` removes those on first use and warns if the tree is read-only.
+A `standalone_helpers/` directory sitting inside a tool's `standalone/` dir does not shadow the installed package: the worker bootstrap puts the published helpers dir at `sys.path[0]`, and `source standalone_helpers.sh` resolves off `PATH`. Delete any such directory — nothing reads it.
 
 **Debugging:**
 ```bash

@@ -57,8 +57,8 @@ def _prepend_helpers_dir_to_sys_path() -> None:
     """Put the published helpers dir at ``sys.path[0]`` so the canonical package always wins.
 
     ``PROTO_STANDALONE_HELPERS_DIR`` is already on ``PYTHONPATH``, but that ranks below the
-    standalone dir, where an older proto_tools may have left a stale ``standalone_helpers/``
-    copy. Inserting it here keeps that leftover from shadowing the installed version.
+    standalone dir. Inserting it at the front means anything sitting in the standalone dir
+    under a helper name cannot shadow the installed package.
     """
     helpers_dir = os.environ.get("PROTO_STANDALONE_HELPERS_DIR")
     if not helpers_dir:
