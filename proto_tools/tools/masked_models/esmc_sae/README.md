@@ -17,7 +17,7 @@ An SAE is trained to reconstruct a language model's internal activations through
 
 Two hyperparameters set the granularity. `k` fixes how many features activate per residue, and `codebook_size` fixes how many features exist in total. Small codebooks group related concepts into one feature, for example a single metal-binding feature; large codebooks split that into dedicated zinc-finger, iron-sulfur, and calcium-binding features.
 
-**Every combination of these is a separately trained model, not a runtime setting.** An SAE learns its dictionary against one backbone, one layer, one `k`, and one `codebook_size`, so those values are fixed in the weights. `model_checkpoint`, `sae_target`, `layers`, `k`, and `codebook_size` therefore act together as a selector: the tool composes them into a HuggingFace repo id and loads that SAE. Changing `k` from 64 to 256 does not relax a threshold — it loads a different model, whose feature indices mean different things. Biohub published 97 such SAEs, and only some combinations exist, so the config rejects the ones that do not and names the valid alternatives.
+**Every combination of these is a separately trained model, not a runtime setting.** An SAE learns its dictionary against one backbone, one layer, one `k`, and one `codebook_size`, so those values are fixed in the weights. `model_checkpoint`, `sae_target`, `layers`, `k`, and `codebook_size` therefore act together as a selector: the tool composes them into a HuggingFace repo id and loads that SAE. Biohub published 97 such SAEs, and only some combinations exist, so the config rejects the ones that do not and names the valid alternatives.
 
 ## Tools
 
