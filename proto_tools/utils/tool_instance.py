@@ -2026,6 +2026,17 @@ class ToolInstance:
                 f"setup.sh and python_version.txt (missing: {missing}). "
                 f"`proto-tools eject-standalone {toolkit}` produces a valid starting point."
             )
+        # Older ejects included these. Say so, rather than let an edit to them quietly do nothing.
+        stray = [f for f in ("run.py", "inference.py") if (path / f).is_file()]
+        if stray:
+            logger.warning(
+                "%s contains %s, which %s will NOT use: the override replaces the environment "
+                "definition (setup.sh, requirements.txt, ...), not the tool implementation. "
+                "Edits to those files have no effect; delete them to avoid confusion.",
+                path,
+                ", ".join(stray),
+                var,
+            )
         return path.resolve()
 
     @classmethod
@@ -2047,15 +2058,43 @@ class ToolInstance:
             return override, f"{toolkit}__override_{digest}"
         return cls._packaged_env_def(toolkit)
 
+    # The only Python an override may carry: env config, not tool implementation.
+    _EJECTABLE_PY = frozenset({"binary_config.py"})
+
+    @classmethod
+    def _eject_ignore(cls, _directory: str, names: list[str]) -> set[str]:
+        """Select names ``eject_standalone`` must not copy.
+
+        An override replaces the environment definition, never the tool implementation,
+        so ejecting ``run.py``/``inference.py`` would hand the user files their edits
+        can't affect. Python is implementation by default; ``binary_config.py`` is the
+        one exception, being environment config that happens to be Python.
+
+        Args:
+            _directory (str): Directory being copied (unused; required by ``copytree``).
+            names (list[str]): Entries in that directory.
+
+        Returns:
+            set[str]: Entries to skip.
+        """
+        skipped = {n for n in names if n in cls._HELPER_ARTIFACTS or n == "__pycache__"}
+        skipped |= {n for n in names if n.endswith(".py") and n not in cls._EJECTABLE_PY}
+        return skipped
+
     @classmethod
     def eject_standalone(cls, toolkit: str, dest_root: Path) -> Path:
         """Copy a tool's packaged standalone env-def dir to ``dest_root/<toolkit>/``.
 
-        Gives the user an editable, working-directory copy of every file the
-        tool's environment is built from (``setup.sh``, ``python_version.txt``,
-        ``requirements.txt``, ``env_vars.txt``, ...), as the starting point for a
-        ``PROTO_<TOOLKIT>_STANDALONE_DIR`` override. Always copies the *packaged*
-        definition (resolving shared envs), ignoring any active override.
+        Gives the user an editable, working-directory copy of the files the tool's
+        environment is *built* from (``setup.sh``, ``python_version.txt``,
+        ``requirements.txt``, ``env_vars.txt``, ``binary_config.py``, ...), as the
+        starting point for a ``PROTO_<TOOLKIT>_STANDALONE_DIR`` override. Always copies
+        the *packaged* definition (resolving shared envs), ignoring any active override.
+
+        The tool implementation (``run.py``, ``inference.py``, and any modules they
+        import) is deliberately excluded: the override redirects the environment
+        definition only, so copying implementation would offer an edit that silently
+        does nothing.
 
         Returns:
             Path: The destination directory (``dest_root/<toolkit>``).
@@ -2069,7 +2108,7 @@ class ToolInstance:
         dest = (Path(dest_root) / toolkit).resolve()
         if dest.exists():
             raise FileExistsError(f"{dest} already exists; remove it or pass a different --dir.")
-        shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*cls._HELPER_ARTIFACTS))
+        shutil.copytree(src, dest, ignore=cls._eject_ignore)
         return dest
 
     @classmethod

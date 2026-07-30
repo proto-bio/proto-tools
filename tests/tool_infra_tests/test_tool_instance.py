@@ -2327,6 +2327,48 @@ def test_eject_standalone_refuses_existing_dest(tmp_path):
         ToolInstance.eject_standalone(_OVERRIDE_TOOLKIT, tmp_path)
 
 
+def test_eject_standalone_excludes_tool_implementation(tmp_path):
+    """The override redirects the env definition only, so implementation must not be ejected."""
+    src, _ = ToolInstance._packaged_env_def(_OVERRIDE_TOOLKIT)
+    assert (src / "inference.py").is_file(), "fixture assumes the packaged dir ships a script"
+
+    dest = ToolInstance.eject_standalone(_OVERRIDE_TOOLKIT, tmp_path)
+
+    assert not (dest / "inference.py").exists()
+    assert not (dest / "run.py").exists()
+    assert (dest / "setup.sh").is_file()
+
+
+def test_eject_standalone_keeps_non_python_env_definition(tmp_path):
+    """Non-Python env-def files (Singularity.def, filter JSON) stay editable."""
+    src, _ = ToolInstance._packaged_env_def(_OVERRIDE_TOOLKIT)
+    (src_extra := src / "extra_env_asset.json").write_text("{}\n")
+    try:
+        dest = ToolInstance.eject_standalone(_OVERRIDE_TOOLKIT, tmp_path)
+    finally:
+        src_extra.unlink()
+    assert (dest / "extra_env_asset.json").is_file()
+
+
+def test_eject_standalone_keeps_binary_config(tmp_path):
+    """binary_config.py is env config, not implementation, and fix-env documents it as editable."""
+    assert "binary_config.py" in ToolInstance._EJECTABLE_PY
+    assert ToolInstance._eject_ignore("", ["binary_config.py", "run.py", "setup.sh"]) == {"run.py"}
+
+
+def test_override_warns_when_dir_carries_a_stale_script(tmp_path, monkeypatch, caplog):
+    """Dirs ejected before implementation was excluded still have run.py; say it is ignored."""
+    override = _write_valid_standalone(tmp_path / "custom")
+    (override / "run.py").write_text("# left over from an older eject\n")
+    monkeypatch.setenv(_OVERRIDE_ENV_VAR, str(override))
+
+    with caplog.at_level(logging.WARNING):
+        ToolInstance._standalone_override_dir(_OVERRIDE_TOOLKIT)
+
+    assert "run.py" in caplog.text
+    assert "will NOT use" in caplog.text
+
+
 def test_env_path_too_long_fails_fast(tmp_path, monkeypatch):
     """The full env prefix is guarded, not just the root.
 
