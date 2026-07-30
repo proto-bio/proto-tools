@@ -76,26 +76,37 @@ def _field_table(title: str, doc: ModelDoc) -> str:
     return header + "\n" + _field_rows(doc)
 
 
-def _without_base_config_fields(doc: ModelDoc) -> ModelDoc:
-    """Drop the runtime fields every config inherits from ``BaseConfig``.
+def _without_inherited_runtime_fields(doc: ModelDoc, model_class: type[BaseModel]) -> ModelDoc:
+    """Drop runtime fields the config inherits from ``BaseConfig`` without overriding.
 
-    ``device``, ``seed``, ``timeout`` and ``verbose`` control execution rather than the
-    computation, are identical across every tool, and are covered by the runtime guides.
-    Listing them in each table buries the fields that actually differ. Taken from
-    ``BaseConfig.model_fields`` rather than hardcoded, so a new inherited field is
-    excluded automatically; tools that override one are still filtered, since the
-    override changes the default rather than the field's meaning.
+    ``device``, ``seed``, ``timeout`` and ``verbose`` govern execution rather than the
+    computation, and when inherited unchanged they are identical across every tool and
+    covered by the runtime guides — listing them buries the fields that actually differ.
+    A tool that redeclares one is making a deliberate per-tool choice (a GPU tool
+    defaulting ``device`` to ``"cuda"``, say), so those stay in the table.
+
+    The inherited set comes from ``BaseConfig.model_fields`` rather than a hardcoded
+    list, so a field added to ``BaseConfig`` later is handled without changes here.
     """
     from proto_tools.utils.base_config import BaseConfig
 
-    inherited = set(BaseConfig.model_fields)
-    return doc.model_copy(update={"fields": [f for f in doc.fields if f.name not in inherited]})
+    def is_overridden(name: str) -> bool:
+        """True if any class below ``BaseConfig`` redeclares ``name``."""
+        for klass in model_class.__mro__:
+            if klass is BaseConfig:
+                return False
+            if name in vars(klass).get("__annotations__", {}):
+                return True
+        return False
+
+    hidden = {name for name in BaseConfig.model_fields if not is_overridden(name)}
+    return doc.model_copy(update={"fields": [f for f in doc.fields if f.name not in hidden]})
 
 
-def _model_table(doc: ModelDoc, kind: str) -> str:
+def _model_table(doc: ModelDoc, kind: str, model_class: type[BaseModel] | None = None) -> str:
     """Render a ``ModelDoc`` as a markdown table for notebook display."""
-    if kind == "config":
-        doc = _without_base_config_fields(doc)
+    if kind == "config" and model_class is not None:
+        doc = _without_inherited_runtime_fields(doc, model_class)
     if not doc.fields:
         return f"*No {kind} fields.*"
     return _field_table(f"**{kind.capitalize()}** — `{doc.name}`", doc)
@@ -326,5 +337,6 @@ def display_api_reference(tool: str, model: str, function_name: str | None = Non
     if model_key == "output":
         markdown = _render_output(target)
     else:
-        markdown = _model_table(get_model_doc(getattr(target, model_attr)), model_key)
+        model_class = getattr(target, model_attr)
+        markdown = _model_table(get_model_doc(model_class), model_key, model_class)
     display(Markdown(markdown))  # type: ignore[no-untyped-call]
