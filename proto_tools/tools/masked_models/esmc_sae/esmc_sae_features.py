@@ -52,9 +52,7 @@ _ALL_LAYER_K = 64
 _DOWNLOAD_WARN_GB = 10.0
 
 
-def resolve_sae_repo(
-    model_checkpoint: str, sae_target: str, layers: list[int], k: int, codebook_size: int
-) -> str:
+def resolve_sae_repo(model_checkpoint: str, sae_target: str, layers: list[int], k: int, codebook_size: int) -> str:
     """Resolve an SAE configuration to the HuggingFace repo that publishes it.
 
     Two families are available. Single-layer SAEs sweep ``k`` and ``codebook_size`` but
@@ -200,9 +198,7 @@ class ESMCSAEFeaturesOutput(BaseToolOutput):
 
             with open(path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(
-                    ["sequence_index", "layer", "position", "residue", "feature_index", "magnitude"]
-                )
+                writer.writerow(["sequence_index", "layer", "position", "residue", "feature_index", "magnitude"])
                 for seq_idx, result in enumerate(self.results):
                     for layer in result.layers:
                         for pos, (indices, magnitudes) in enumerate(
@@ -211,9 +207,7 @@ class ESMCSAEFeaturesOutput(BaseToolOutput):
                             residue = result.sequence[pos]
                             for feature_index, magnitude in zip(indices, magnitudes, strict=True):
                                 # position is 1-indexed, per the repo's coordinate convention.
-                                writer.writerow(
-                                    [seq_idx, layer.layer, pos + 1, residue, feature_index, magnitude]
-                                )
+                                writer.writerow([seq_idx, layer.layer, pos + 1, residue, feature_index, magnitude])
         else:
             raise ValueError(f"Unsupported format: {file_format}")
 
@@ -315,9 +309,7 @@ class ESMCSAEFeaturesConfig(BaseConfig):
         if len(set(self.resolved_layers)) != len(self.resolved_layers):
             raise ValueError(f"layers must be unique, got {self.resolved_layers}")
 
-        resolve_sae_repo(
-            self.model_checkpoint, self.sae_target, self.resolved_layers, self.k, self.codebook_size
-        )
+        resolve_sae_repo(self.model_checkpoint, self.sae_target, self.resolved_layers, self.k, self.codebook_size)
         return self
 
     @property
@@ -447,7 +439,7 @@ def run_esmc_sae_features(
                     feature_magnitudes=per_sequence[str(layer)]["magnitudes"],
                 )
                 for layer in config.resolved_layers
-            ]
+            ],
         )
         for sequence, per_sequence in zip(inputs.sequences, outputs["features"], strict=True)
     ]

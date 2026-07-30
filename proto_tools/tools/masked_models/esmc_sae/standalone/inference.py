@@ -93,9 +93,7 @@ class ESMCSAEModel:
                 features.extend(self._esm_batch(batch))
             return {"features": features}
 
-        for batch in tqdm(
-            batches, desc="ESM C SAE inference", unit="batch", total=len(batches), disable=not verbose
-        ):
+        for batch in tqdm(batches, desc="ESM C SAE inference", unit="batch", total=len(batches), disable=not verbose):
             inputs = self.tokenizer(batch, padding=True, truncation=False, return_tensors="pt")
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -215,9 +213,7 @@ class ESMCSAEModel:
         allow_patterns = ["config.json"] + [f"layer_{layer}.safetensors" for layer in self.layers]
         logger.update_status(f"Loading SAE layers {list(self.layers)}")
         device_for_sae = self.model.device if hasattr(self.model, "device") else device
-        sae = HFSAEModel.from_pretrained(
-            self.sae_repo, allow_patterns=allow_patterns, device=device_for_sae
-        )
+        sae = HFSAEModel.from_pretrained(self.sae_repo, allow_patterns=allow_patterns, device=device_for_sae)
         sae.initialize_layers(list(self.layers))
         self.sae = sae
         # The esm path applies the SAE modules itself; only Transformers hooks them in.

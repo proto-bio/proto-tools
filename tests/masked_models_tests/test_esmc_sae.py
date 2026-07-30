@@ -178,9 +178,7 @@ def test_esmc_sae_features_benchmark(request):
     inputs = ESMCSAEFeaturesInput(sequences=sequences)
     config = ESMCSAEFeaturesConfig(batch_size=8)
 
-    result = benchmark_twice(
-        request, "esmc_sae", lambda: run_esmc_sae_features(inputs=inputs, config=config)
-    )
+    result = benchmark_twice(request, "esmc_sae", lambda: run_esmc_sae_features(inputs=inputs, config=config))
 
     assert result.tool_id == "esmc-sae-features"
     assert len(result.results) == 50
@@ -212,9 +210,7 @@ def test_esm_backbone_layer_offset():
     config = ESMCSAEFeaturesConfig(layers=[23])
 
     reference = run_esmc_sae_features(inputs=inputs, config=config)
-    candidate = run_esmc_sae_features(
-        inputs=inputs, config=ESMCSAEFeaturesConfig(layers=[23], backbone="esm")
-    )
+    candidate = run_esmc_sae_features(inputs=inputs, config=ESMCSAEFeaturesConfig(layers=[23], backbone="esm"))
 
     overlap = _top_k_overlap(reference.results[0], candidate.results[0])
     assert overlap > 0.95, (
@@ -272,9 +268,7 @@ def test_esmc_sae_mlp_outputs_features_align_with_residues():
     config = ESMCSAEFeaturesConfig(sae_target="mlp_outputs", codebook_size=131072)
     assert config.sae_repo == "biohub/ESMC-300M-sae-mlp-k64-codebook131072"
 
-    result = run_esmc_sae_features(
-        inputs=ESMCSAEFeaturesInput(sequences=[sequence]), config=config
-    )
+    result = run_esmc_sae_features(inputs=ESMCSAEFeaturesInput(sequences=[sequence]), config=config)
     validate_output(result)
 
     layer = result.results[0].layers[0]
