@@ -117,7 +117,8 @@ class SAELayerFeatures(BaseModel):
 
     Attributes:
         layer (int): Backbone transformer layer the SAE reads from.
-        feature_indices (list[list[int]]): Active codebook indices per residue.
+        feature_indices (list[list[int]]): Active codebook indices per residue, in
+            sequence order; entry 0 is residue 1 of the input.
         feature_magnitudes (list[list[float]]): Activation values per residue.
     """
 
@@ -140,9 +141,15 @@ class SequenceSAEFeatures(BaseModel):
     expand correctly.
 
     Attributes:
+        sequence (str): The input sequence these features were computed from, echoed so
+            an exported row can name the residue a feature fired on.
         layers (list[SAELayerFeatures]): One entry per requested layer, ascending.
     """
 
+    sequence: str = Field(
+        title="Sequence",
+        description="Input sequence these features were computed from",
+    )
     layers: list[SAELayerFeatures] = Field(
         title="Layers",
         description="Per-layer sparse features for this sequence, ascending by layer",
@@ -184,14 +191,20 @@ class ESMCSAEFeaturesOutput(BaseToolOutput):
 
             with open(path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["sequence_index", "layer", "position", "feature_index", "magnitude"])
+                writer.writerow(
+                    ["sequence_index", "layer", "position", "residue", "feature_index", "magnitude"]
+                )
                 for seq_idx, result in enumerate(self.results):
                     for layer in result.layers:
                         for pos, (indices, magnitudes) in enumerate(
                             zip(layer.feature_indices, layer.feature_magnitudes, strict=True)
                         ):
+                            residue = result.sequence[pos]
                             for feature_index, magnitude in zip(indices, magnitudes, strict=True):
-                                writer.writerow([seq_idx, layer.layer, pos + 1, feature_index, magnitude])
+                                # position is 1-indexed, per the repo's coordinate convention.
+                                writer.writerow(
+                                    [seq_idx, layer.layer, pos + 1, residue, feature_index, magnitude]
+                                )
         else:
             raise ValueError(f"Unsupported format: {file_format}")
 
@@ -414,6 +427,7 @@ def run_esmc_sae_features(
 
     results = [
         SequenceSAEFeatures(
+            sequence=sequence,
             layers=[
                 SAELayerFeatures(
                     layer=layer,
@@ -423,7 +437,7 @@ def run_esmc_sae_features(
                 for layer in config.resolved_layers
             ]
         )
-        for per_sequence in outputs["features"]
+        for sequence, per_sequence in zip(inputs.sequences, outputs["features"], strict=True)
     ]
 
     return ESMCSAEFeaturesOutput(

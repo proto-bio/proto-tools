@@ -140,11 +140,24 @@ def test_esmc_sae_export_writes_every_active_feature(tmp_path):
     result.export(name="features", export_path=tmp_path, file_format="json")
     result.export(name="features", export_path=tmp_path, file_format="csv")
 
-    assert json.loads((tmp_path / "features.json").read_text())[0]["layers"][0]["layer"] == 23
+    exported = json.loads((tmp_path / "features.json").read_text())
+    assert exported[0]["layers"][0]["layer"] == 23
+    assert exported[0]["sequence"] == sequence
 
     rows = (tmp_path / "features.csv").read_text().splitlines()
     # One header plus one row per (residue, active feature).
     assert len(rows) == 1 + len(sequence) * config.k
+    assert rows[0] == "sequence_index,layer,position,residue,feature_index,magnitude"
+
+    # position is 1-indexed and residue names the amino acid at that position.
+    import csv
+
+    parsed = list(csv.DictReader(rows))
+    assert parsed[0]["position"] == "1"
+    assert parsed[0]["residue"] == sequence[0]
+    last = parsed[-1]
+    assert last["position"] == str(len(sequence))
+    assert last["residue"] == sequence[-1]
 
 
 # ── Benchmarks ────────────────────────────────────────────────────────────────
