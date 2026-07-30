@@ -9,8 +9,10 @@ import pytest
 from pydantic import ValidationError
 
 from proto_tools.tools.masked_models.esmc_sae import (
+    DESCRIBED_SAE_REPO,
     ESMCSAEFeaturesConfig,
     ESMCSAEFeaturesInput,
+    describe_sae_features,
     resolve_sae_repo,
     run_esmc_sae_features,
 )
@@ -27,19 +29,23 @@ _persistent_tool = make_persistent_fixture("esmc_sae")
     ("kwargs", "expected_repo"),
     [
         # k=64 at a published codebook size serves any layer set.
-        ({}, "biohub/ESMC-300M-sae-k64-codebook16384"),
+        # A request for exactly the sweep layer gets the SAE trained for that layer.
+        ({}, "biohub/ESMC-300M-sae-layer23-k64-codebook16384"),
         ({"layers": [0, 11, 23]}, "biohub/ESMC-300M-sae-k64-codebook16384"),
-        ({"model_checkpoint": "esmc_600m"}, "biohub/ESMC-600M-sae-k64-codebook16384"),
+        ({"model_checkpoint": "esmc_600m"}, "biohub/ESMC-600M-sae-layer27-k64-codebook16384"),
         # 6B is the only backbone with an all-layer 131072 codebook.
         (
             {"model_checkpoint": "esmc_6b", "codebook_size": 131072},
-            "biohub/ESMC-6B-sae-k64-codebook131072",
+            "biohub/ESMC-6B-sae-layer60-k64-codebook131072",
         ),
         # MLP-output SAEs are published only at 131072.
+        # MLP-output SAEs have no single-layer family, so they always use the all-layer repo.
         (
             {"sae_target": "mlp_outputs", "codebook_size": 131072},
             "biohub/ESMC-300M-sae-mlp-k64-codebook131072",
         ),
+        # Multiple layers can only come from the all-layer family.
+        ({"layers": [11, 23]}, "biohub/ESMC-300M-sae-k64-codebook16384"),
         # Non-default k falls through to the single-layer sweep.
         ({"k": 256, "codebook_size": 65536}, "biohub/ESMC-300M-sae-layer23-k256-codebook65536"),
         # 300M has no all-layer 131072, but the sweep layer publishes one.
@@ -277,3 +283,35 @@ def test_esmc_sae_mlp_outputs_features_align_with_residues():
     assert {len(row) for row in layer.feature_indices} == {config.k}
     # Indices address the wider codebook this family uses.
     assert max(max(row) for row in layer.feature_indices) < config.codebook_size
+
+
+# ── Feature descriptions ──────────────────────────────────────────────────────
+
+
+def test_described_sae_is_reachable_from_config():
+    """The 6B defaults resolve to the one SAE whose features have descriptions.
+
+    The all-layer and single-layer 6B SAEs are independently trained, so an index from
+    the wrong one resolves to an unrelated concept. This pins that the described repo is
+    what a user actually gets.
+    """
+    assert ESMCSAEFeaturesConfig(model_checkpoint="esmc_6b").sae_repo == DESCRIBED_SAE_REPO
+
+
+def test_describe_sae_features_rejects_out_of_codebook_indices():
+    """Indices outside the described SAE's codebook cannot be described."""
+    with pytest.raises(ValueError, match="16384-feature codebook"):
+        describe_sae_features([16384])
+
+
+@pytest.mark.integration
+def test_describe_sae_features_returns_labels_and_statistics():
+    """Descriptions carry a label plus the statistics needed to normalize activations."""
+    described = describe_sae_features([3995, 1251])
+
+    assert set(described) == {3995, 1251}
+    assert "Ubiquitin-like" in described[3995]["label"]
+    for record in described.values():
+        # Both are required to compute (activation / max) * idf.
+        assert record["uniref90_max_activation"] > 0
+        assert record["uniref90_idf"] >= 0

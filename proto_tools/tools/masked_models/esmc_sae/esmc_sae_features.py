@@ -57,10 +57,12 @@ def resolve_sae_repo(
 ) -> str:
     """Resolve an SAE configuration to the HuggingFace repo that publishes it.
 
-    Two families are available. All-layer SAEs are trained against every backbone
-    layer but only at ``k=64`` and a fixed codebook size, so they serve any
-    ``layers`` request. Single-layer SAEs sweep ``k`` and ``codebook_size`` but
-    exist only at one layer per backbone, so they serve exactly that layer.
+    Two families are available. Single-layer SAEs sweep ``k`` and ``codebook_size`` but
+    exist only at one layer per backbone, so a request for exactly that layer is served
+    from there — those are the SAEs Biohub studied and published feature descriptions
+    for. Anything else falls to the all-layer SAEs, which cover every backbone layer but
+    only at ``k=64`` and a fixed codebook size. The two families hold independently
+    trained weights, so their feature indices are not interchangeable.
 
     Args:
         model_checkpoint (str): Backbone variant key, e.g. ``"esmc_300m"``.
@@ -78,18 +80,22 @@ def resolve_sae_repo(
     Examples:
         >>> resolve_sae_repo("esmc_300m", "hidden_states", [11, 23], 64, 16384)
         'biohub/ESMC-300M-sae-k64-codebook16384'
-        >>> resolve_sae_repo("esmc_300m", "hidden_states", [23], 256, 65536)
-        'biohub/ESMC-300M-sae-layer23-k256-codebook65536'
+        >>> resolve_sae_repo("esmc_300m", "hidden_states", [23], 64, 16384)
+        'biohub/ESMC-300M-sae-layer23-k64-codebook16384'
     """
     stem = _BACKBONES[model_checkpoint][0]
     mlp = "mlp-" if sae_target == "mlp_outputs" else ""
+    sweep_layer = _SWEEP_LAYER[model_checkpoint]
+
+    # A request for exactly the sweep layer is served by the SAE trained for that layer.
+    # The single-layer and all-layer repos hold independently trained weights, and the
+    # single-layer one is what Biohub studied and generated feature descriptions for, so
+    # the more specific match wins.
+    if sae_target == "hidden_states" and layers == [sweep_layer]:
+        return f"{stem}-sae-layer{sweep_layer}-k{k}-codebook{codebook_size}"
 
     if k == _ALL_LAYER_K and codebook_size in _ALL_LAYER_CODEBOOKS[(sae_target, model_checkpoint)]:
         return f"{stem}-sae-{mlp}k{k}-codebook{codebook_size}"
-
-    sweep_layer = _SWEEP_LAYER[model_checkpoint]
-    if sae_target == "hidden_states" and layers == [sweep_layer]:
-        return f"{stem}-sae-layer{sweep_layer}-k{k}-codebook{codebook_size}"
 
     all_layer_sizes = sorted(_ALL_LAYER_CODEBOOKS[(sae_target, model_checkpoint)])
     raise ValueError(
