@@ -218,3 +218,49 @@ def test_esm_backbone_returns_same_shape_as_transformers():
         for sequence, per_sequence in zip(sequences, result.results, strict=True):
             for layer in per_sequence.layers:
                 assert len(layer.feature_indices) == len(sequence), f"{backbone} layer{layer.layer}"
+
+
+# ── MLP-output SAEs ───────────────────────────────────────────────────────────
+
+
+def test_estimated_download_tracks_codebook_and_layer_count():
+    """The offline size estimate matches the published per-layer file sizes.
+
+    Pinned against real repo sizes so the download warning stays meaningful: a
+    hidden-state 300M layer is 0.13 GB, an MLP-output layer 1.01 GB, and a 6B
+    MLP-output layer 2.69 GB.
+    """
+    hidden = ESMCSAEFeaturesConfig()
+    assert round(hidden.estimated_download_gb, 2) == 0.13
+
+    mlp = ESMCSAEFeaturesConfig(sae_target="mlp_outputs", codebook_size=131072)
+    assert round(mlp.estimated_download_gb, 2) == 1.01
+
+    # Scales linearly with the number of requested layers.
+    mlp_three = ESMCSAEFeaturesConfig(sae_target="mlp_outputs", codebook_size=131072, layers=[5, 15, 23])
+    assert mlp_three.estimated_download_gb == pytest.approx(3 * mlp.estimated_download_gb)
+
+
+@pytest.mark.slow
+@pytest.mark.uses_gpu
+def test_esmc_sae_mlp_outputs_features_align_with_residues():
+    """MLP-output SAEs run end to end and return per-residue features like hidden states.
+
+    Separate from the hidden-state tests because this family is published only at a
+    131072 codebook, so each layer file is ~1 GB.
+    """
+    sequence = "MKTAYIAKQRQISFVKSHFSRQ"
+    config = ESMCSAEFeaturesConfig(sae_target="mlp_outputs", codebook_size=131072)
+    assert config.sae_repo == "biohub/ESMC-300M-sae-mlp-k64-codebook131072"
+
+    result = run_esmc_sae_features(
+        inputs=ESMCSAEFeaturesInput(sequences=[sequence]), config=config
+    )
+    validate_output(result)
+
+    layer = result.results[0].layers[0]
+    assert layer.layer == 23
+    assert len(layer.feature_indices) == len(sequence)
+    assert {len(row) for row in layer.feature_indices} == {config.k}
+    # Indices address the wider codebook this family uses.
+    assert max(max(row) for row in layer.feature_indices) < config.codebook_size

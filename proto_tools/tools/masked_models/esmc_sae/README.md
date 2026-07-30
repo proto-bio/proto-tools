@@ -30,8 +30,9 @@ Feature activations show which concepts the model recognizes at each residue, wh
 #### Usage Tips
 
 - **`layers` selects which activations are decomposed.** The default is the ~75%-depth layer Biohub sweeps (300M: 23, 600M: 27, 6B: 60), where representations transfer best to downstream tasks. Each extra layer adds a download and GPU memory.
+- **`sae_target` picks what the SAE reads.** `hidden_states` (the default) decomposes the accumulated residual stream after a block, so features reflect everything the model has built up to that depth; it is what the ESM Atlas and the published feature descriptions use. `mlp_outputs` decomposes only that block's own MLP contribution before the residual add, which attributes a feature to one layer's computation. MLP-output SAEs are published only at `codebook_size=131072`.
 - **`k` and `codebook_size` are only free at the sweep layer.** All-layer SAEs exist at `k=64` and one codebook size, so varying either requires `layers` to be exactly the sweep layer. The config rejects unpublished combinations and names the valid alternatives.
-- **Only requested layers are downloaded.** The all-layer collections hold one file per backbone layer, so the 6B collection is tens of gigabytes in full; asking for two layers fetches two files.
+- **Only requested layers are downloaded, and layer size tracks `codebook_size`.** Each layer file holds an encoder and decoder of `d_model x codebook_size` weights, so a hidden-state layer is 0.13 GB on 300M and 0.34 GB on 6B, while an MLP-output layer (131072 codebook) is 1.0 GB and 2.7 GB respectively. Requesting every layer of the 6B MLP collection would pull roughly 217 GB; the tool logs a warning past 10 GB rather than refusing, since a deliberate multi-layer sweep is legitimate.
 - **Output size scales with `k` times sequence length.** Each residue carries `k` indices and `k` magnitudes, so a 300-residue protein at `k=64` yields 19,200 pairs per layer.
 
 ## Toolkit Notes

@@ -22,11 +22,11 @@ ESMC_SAE_K = Literal[16, 32, 64, 128, 256, 512]
 ESMC_SAE_CODEBOOK_SIZES = Literal[8192, 16384, 32768, 65536, 131072]
 ESMC_SAE_BACKBONES = Literal["transformers", "esm"]
 
-# HuggingFace repo stem per backbone, and the backbone's transformer depth.
-_BACKBONES: dict[str, tuple[str, int]] = {
-    "esmc_300m": ("biohub/ESMC-300M", 30),
-    "esmc_600m": ("biohub/ESMC-600M", 36),
-    "esmc_6b": ("biohub/ESMC-6B", 80),
+# HuggingFace repo stem per backbone, its transformer depth, and its hidden width.
+_BACKBONES: dict[str, tuple[str, int, int]] = {
+    "esmc_300m": ("biohub/ESMC-300M", 30, 960),
+    "esmc_600m": ("biohub/ESMC-600M", 36, 1152),
+    "esmc_6b": ("biohub/ESMC-6B", 80, 2560),
 }
 
 # Layer targeted by the single-layer sweep: ~75% depth, where Biohub found
@@ -46,6 +46,10 @@ _ALL_LAYER_CODEBOOKS: dict[tuple[str, str], frozenset[int]] = {
 
 # All-layer SAEs are only published at k=64.
 _ALL_LAYER_K = 64
+
+# Warn past this much estimated SAE download. MLP-output SAEs use a 131072 codebook,
+# so one 6B layer is ~2.7 GB and a full sweep runs to hundreds of gigabytes.
+_DOWNLOAD_WARN_GB = 10.0
 
 
 def resolve_sae_repo(
@@ -300,6 +304,20 @@ class ESMCSAEFeaturesConfig(BaseConfig):
         return sorted(self.layers)
 
     @property
+    def estimated_download_gb(self) -> float:
+        """Approximate SAE download for the requested layers, in gigabytes.
+
+        Counts the two dominant tensors in a layer file, ``W_enc`` and ``W_dec``, each
+        ``d_model x codebook_size`` fp32. Excludes the decoder bias and the ``idf`` /
+        ``max`` normalization buffers, which together add well under a percent.
+        Computed rather than queried so config validation stays offline; agrees with
+        the published file sizes to two decimal places.
+        """
+        d_model = _BACKBONES[self.model_checkpoint][2]
+        per_layer = d_model * self.codebook_size * 2 * 4
+        return len(self.resolved_layers) * per_layer / 1e9
+
+    @property
     def sae_repo(self) -> str:
         """HuggingFace repo id for the configured SAE."""
         return resolve_sae_repo(
@@ -366,7 +384,17 @@ def run_esmc_sae_features(
         >>> print([layer.layer for layer in result.results[0].layers])
         [11, 23]
     """
-    logger.debug(f"Using local for ESM C SAE features: {config.model_checkpoint} @ {config.sae_repo}")
+    estimated_gb = config.estimated_download_gb
+    if estimated_gb > _DOWNLOAD_WARN_GB:
+        logger.warning(
+            f"{len(config.resolved_layers)} layers of {config.sae_repo} is about "
+            f"{estimated_gb:.0f} GB of SAE weights to download on first use. Request fewer "
+            f"layers, or a smaller codebook_size, to reduce it."
+        )
+    logger.debug(
+        f"Using local for ESM C SAE features: {config.model_checkpoint} @ {config.sae_repo} "
+        f"(~{estimated_gb:.2f} GB for layers {config.resolved_layers})"
+    )
     outputs = ToolInstance.dispatch(
         "esmc_sae",
         {
