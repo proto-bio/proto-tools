@@ -88,6 +88,27 @@ class ToolNotDeployedError(ModalDispatchError):
         self.app_name = app_name
 
 
+class ModalEnvironmentNotFoundError(ModalDispatchError):
+    """Raised when the Modal environment a call names has not been created.
+
+    Modal reports a missing environment and a missing app identically, so without this a
+    workspace that never ran the one-time setup is told its tools are undeployed, and sent to
+    deploy things that cannot land anywhere.
+    """
+
+    def __init__(self, environment: str, available: list[str] | None = None) -> None:
+        """Build the error, naming the command that creates the environment."""
+        known = f" This workspace has: {', '.join(sorted(available))}." if available else ""
+        super().__init__(
+            f"Modal environment {environment!r} has not been created in this workspace.{known}\n"
+            f"Nothing can be deployed to it or run in it until it exists. Create it with:\n\n"
+            f"    proto-tools deploy --create-env --env {environment}\n\n"
+            f"More: {PROTO_TOOLS_REPO}"
+        )
+        self.environment = environment
+        self.available = available
+
+
 def available_tools() -> dict[str, tuple[str, str]]:
     """Return ``{tool_key: (service_class_name, method_name)}`` for every shipped tool.
 
@@ -190,11 +211,31 @@ def _bound_method(
             service_cls = service_cls.with_options(scaledown_window=scaledown_window)
         service_cls.hydrate()
     except modal.exception.NotFoundError as exc:
-        raise ToolNotDeployedError(tool_key, app_name) from exc
+        raise _missing_lookup_error(tool_key, app_name, environment, client) from exc
     except modal.exception.AuthError as exc:
         # Credentials were present (checked up front) but Modal rejected them.
         raise ModalCredentialsError("Modal rejected them (expired or invalid)") from exc
     return getattr(service_cls(), method_name)
+
+
+def _missing_lookup_error(
+    tool_key: str, app_name: str, environment: str | None, client: Any | None
+) -> ModalDispatchError:
+    """Decide whether a Modal lookup missed because of the environment or the app.
+
+    Modal raises the same error for both, and the two need opposite actions: create an
+    environment, or deploy into one that already exists. Only asked once a lookup has already
+    failed, and a workspace that cannot be listed leaves the app answer, which is the safe
+    assumption when the environment is almost always the one this machine already uses.
+    """
+    from proto_tools.modal.app import environment_names
+
+    if environment is None:
+        return ToolNotDeployedError(tool_key, app_name)
+    names = environment_names(client)
+    if names is not None and environment not in names:
+        return ModalEnvironmentNotFoundError(environment, names)
+    return ToolNotDeployedError(tool_key, app_name)
 
 
 class DeploymentDriftWarning(UserWarning):
