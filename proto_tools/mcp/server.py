@@ -229,11 +229,8 @@ def build_server(device: Device = "modal") -> FastMCP:
                 return {"ok": False, "error": str(exc), "valid_run_on": ["local", "modal", "proto"]}
 
         loop = asyncio.get_running_loop()
-        # Records arrive on the tailer thread, and reporting has to happen on the loop -- but not
-        # from just anywhere on it. The progress token belongs to this request's context, and a
-        # task scheduled from another thread is created outside that context, so it reports into
-        # nothing and says it succeeded. Handing the message to a task started here, where the
-        # context is live, is what makes it reach the client.
+        # A task scheduled from another thread falls outside this request's context, where the
+        # progress token lives, and silently reports nothing.
         messages: asyncio.Queue[str | None] = asyncio.Queue()
 
         async def pump() -> None:
@@ -248,15 +245,13 @@ def build_server(device: Device = "modal") -> FastMCP:
                     await ctx.report_progress(progress=step, message=message)
 
         pumping = asyncio.create_task(pump())
-        # Named before anything else, because a client shows the latest message as the state of
-        # the call: without this the first thing it can say is generic, and a tool that reports
-        # nothing at all -- anything answered in this process -- would stay that way throughout.
+        # Named first, or the opening message is generic and a tool that reports nothing at all
+        # stays that way throughout.
         messages.put_nowait(f"Running {tool_key}")
 
         def forward(record: dict[str, Any]) -> None:
-            # On the tailer thread. Nothing here touches the loop except the threadsafe handoff;
-            # a caller who disconnected mid-call leaves a closed loop, and raising in the tailer
-            # would take down progress for a run that is otherwise fine.
+            # On the tailer thread: a caller who disconnected leaves a closed loop, and raising
+            # here would take down progress for a run that is otherwise fine.
             message = record.get("m")
             if not message:
                 return
